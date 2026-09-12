@@ -51,11 +51,13 @@ app.post("/render",auth,async(req,res)=>{
 
     const font="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
     const duration=Math.max(10,Math.min(30,Number(req.body.duration||15)));
-    // Lightweight render: avoid zoompan because it can exhaust Railway CPU/RAM.
-    // Keep the final canvas at 1080x1920, but scale/crop only once and encode with one thread.
+    // Lightweight motion render: no zoompan. We oversize the image once, then
+    // gently pan the crop from left to right and back using a per-frame crop
+    // expression. This keeps visible movement while staying much lighter on CPU/RAM.
+    const d=duration;
     const vf=[
-      "scale=1080:1920:force_original_aspect_ratio=increase",
-      "crop=1080:1920",
+      "scale=1188:2112:force_original_aspect_ratio=increase",
+      `crop=1080:1920:x='(iw-1080)*(0.5+0.5*sin(PI*2*t/${d}))':y='(ih-1920)*0.5'`,
       "drawbox=x=0:y=0:w=1080:h=390:color=black@0.52:t=fill",
       `drawtext=fontfile=${font}:textfile=${hookFile}:fontcolor=white:fontsize=58:line_spacing=12:x=70:y=105:box=0`,
       "drawbox=x=55:y=1770:w=970:h=95:color=black@0.68:t=fill",
