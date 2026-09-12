@@ -51,18 +51,19 @@ app.post("/render",auth,async(req,res)=>{
 
     const font="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
     const duration=Math.max(10,Math.min(30,Number(req.body.duration||15)));
+    // Lightweight render: avoid zoompan because it can exhaust Railway CPU/RAM.
+    // Keep the final canvas at 1080x1920, but scale/crop only once and encode with one thread.
     const vf=[
-      "scale=1080:1920:force_original_aspect_ratio=decrease",
-      "pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
-      "zoompan=z='min(zoom+0.0007,1.10)':d="+(duration*30)+":s=1080x1920:fps=30",
+      "scale=1080:1920:force_original_aspect_ratio=increase",
+      "crop=1080:1920",
       "drawbox=x=0:y=0:w=1080:h=390:color=black@0.52:t=fill",
       `drawtext=fontfile=${font}:textfile=${hookFile}:fontcolor=white:fontsize=58:line_spacing=12:x=70:y=105:box=0`,
       "drawbox=x=55:y=1770:w=970:h=95:color=black@0.68:t=fill",
       `drawtext=fontfile=${font}:textfile=${ctaFile}:fontcolor=white:fontsize=40:x=(w-text_w)/2:y=1795`
     ].join(",");
 
-    let cmd=ffmpeg(img).inputOptions(["-loop 1"]).videoCodec("libx264").outputOptions([
-      "-t",String(duration),"-pix_fmt","yuv420p","-r","30","-movflags","+faststart","-preset","veryfast","-crf","23","-vf",vf
+    let cmd=ffmpeg(img).inputOptions(["-loop 1","-framerate 30"]).videoCodec("libx264").outputOptions([
+      "-t",String(duration),"-pix_fmt","yuv420p","-r","30","-movflags","+faststart","-preset","ultrafast","-crf","28","-threads","1","-vf",vf
     ]);
     if(req.body.audioData){
       cmd=cmd.input(aud).audioCodec("aac").audioFilters([`apad=pad_dur=${duration}`]).outputOptions(["-t",String(duration)]);
