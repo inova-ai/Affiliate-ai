@@ -1,0 +1,1 @@
+{"name":"affiliate-video-worker","private":true,"scripts":{"start":"node server.js"},"dependencies":{"express":"latest","fluent-ffmpeg":"latest","@aws-sdk/client-s3":"latest"}}
