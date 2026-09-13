@@ -11,9 +11,29 @@ const motion:{[k:string]:string}={
  Elegant:"subtle elegant head movement, gentle hand gesture, refined posture, smooth natural body movement, fixed camera, photorealistic"
 };
 export default function Home(){
- const [file,setFile]=useState<File|null>(null),[preview,setPreview]=useState(""),[name,setName]=useState(""),[link,setLink]=useState(""),[style,setStyle]=useState("Review"),[duration,setDuration]=useState("4"),[result,setResult]=useState<Result|null>(null),[busy,setBusy]=useState(false),[status,setStatus]=useState("Siap"),[video,setVideo]=useState("");
+ const [file,setFile]=useState<File|null>(null),[preview,setPreview]=useState(""),[name,setName]=useState(""),[link,setLink]=useState(""),[style,setStyle]=useState("Review"),[duration,setDuration]=useState("4"),[result,setResult]=useState<Result|null>(null),[busy,setBusy]=useState(false),[status,setStatus]=useState("Siap"),[video,setVideo]=useState(""),[editBusy,setEditBusy]=useState(false),[editStatus,setEditStatus]=useState("Siap"),[editedImage,setEditedImage]=useState("");
  const choose=(f:File)=>{setFile(f);setPreview(URL.createObjectURL(f));setVideo("");};
  const toDataURL=(f:File)=>new Promise<string>((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result));r.onerror=reject;r.readAsDataURL(f)});
+ async function editPhoto(){
+  if(!file)return alert("Upload foto dulu.");
+  setEditBusy(true);setEditedImage("");setEditStatus("AI sedang membuat 3 pose...");
+  try{
+   const blob=await (await fetch(await toDataURL(file))).blob();
+   const {Client}=await import("@gradio/client");
+   const app=await Client.connect("kulkas2pintu/QWEN_EDIT_IMAGE");
+   const prompt="Create a clean three-panel fashion catalog image from this one source photo. Show the exact same person three times side by side, with the same face, hairstyle, clothing, body proportions and overall identity. Each panel must have a clearly different natural pose: 1) standing front-facing with arms relaxed, 2) standing turned slightly away with hands at the waist, 3) seated or leaning casually with one hand near the face. Keep the same outfit and a consistent simple studio background. Full-body composition, realistic photography, natural anatomy, realistic hands, consistent lighting. Do not add any other people, objects, text or watermark.";
+   const res:any=await app.predict("/edit",{
+    image:blob,prompt,lora_adapter:"",image2:null,seed:0,randomize_seed:true,
+    guidance_scale:2.5,steps:6,preserve_identity:true,identity_strength:80,
+    output_size:1536,fix_hands:true
+   });
+   const payload=res?.data?.[0] ?? res?.data ?? res;
+   const url=typeof payload==="string"?payload:(payload?.url||payload?.path||payload?.data);
+   if(!url)throw new Error("Gambar hasil edit tidak dikembalikan.");
+   setEditedImage(url);setEditStatus("3 pose selesai.");
+  }catch(e:any){setEditStatus("Gagal: "+(e?.message||e));}
+  finally{setEditBusy(false)}
+ }
  async function generate(){
   if(!file)return alert("Upload foto dulu.");
   setBusy(true);setVideo("");setStatus("AI sedang membaca foto...");
@@ -47,7 +67,23 @@ export default function Home(){
    </section>
    <section className="card resultCard"><div className="sectionTitle">02 <b>Video</b></div><div className="video">{video?<video controls playsInline src={video}/>:preview?<img src={preview}/>:<div className="muted">Hasil video akan muncul di sini</div>}</div>{video&&<a className="download" href={video} download="affiliate-ai-video.mp4">⬇ Download MP4</a>}</section>
   </div>
-  {result&&<section className="card content"><div className="sectionTitle">03 <b>Materi Affiliate</b></div><h3>Hook</h3><div className="result">{result.hook}</div><h3>Script</h3><div className="result">{result.script}</div><h3>Caption</h3><div className="result">{result.caption}</div><h3>Hashtag</h3><div>{result.hashtags?.map((x,i)=><span className="pill" key={i}>{x}</span>)}</div></section>}
+  <section className="card editorCard">
+   <div className="sectionTitle">03 <b>Edit Foto AI</b></div>
+   <p className="editorIntro">Masukkan 1 foto satu orang. AI akan membuat satu gambar berisi orang yang sama dalam 3 pose berbeda, seperti katalog fashion.</p>
+   <div className="editorGrid">
+    <div className="editorPreview">{editedImage?<img src={editedImage} alt="Hasil 3 pose"/>:<>{preview?<img src={preview} alt="Foto sumber"/>:<div className="muted">Foto sumber akan muncul di sini</div>}</>}</div>
+    <div className="editorControls">
+     <div className="editBadge">MODE · 3 POSE</div>
+     <h3>3 pose katalog</h3>
+     <p className="muted">Wajah, pakaian, proporsi dan identitas dipertahankan sebisa mungkin. Pose dibuat berbeda secara otomatis.</p>
+     <button className="btn" disabled={editBusy||busy} onClick={editPhoto}>{editBusy?"AI sedang membuat…":"✨ EDIT JADI 3 POSE"}</button>
+     <div className="status">{editStatus}</div>
+     {editedImage&&<a className="download" href={editedImage} download="affiliate-ai-3-pose.png">⬇ Download PNG</a>}
+     <div className="tiny">Menggunakan Qwen Image Edit melalui Hugging Face ZeroGPU. Gratis untuk testing, tetapi bisa antre dan memiliki kuota.</div>
+    </div>
+   </div>
+  </section>
+  {result&&<section className="card content"><div className="sectionTitle">04 <b>Materi Affiliate</b></div><h3>Hook</h3><div className="result">{result.hook}</div><h3>Script</h3><div className="result">{result.script}</div><h3>Caption</h3><div className="result">{result.caption}</div><h3>Hashtag</h3><div>{result.hashtags?.map((x,i)=><span className="pill" key={i}>{x}</span>)}</div></section>}
   <footer>Affiliate AI Studio · Free MVP · Wan 2.2 Image-to-Video</footer>
  </main>
 }
