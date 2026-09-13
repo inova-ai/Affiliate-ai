@@ -65,15 +65,15 @@ export default function Home(){
    <div className="sectionTitle">03 <b>Edit Foto AI</b></div>
    <p className="editorIntro">Masukkan 1 foto satu orang. AI akan membuat satu gambar berisi orang yang sama dalam 3 pose berbeda, seperti katalog fashion.</p>
    <div className="editorGrid">
-    <div className="editorPreview">{editedImage?<img src={editedImage} alt="Hasil 3 pose"/>:<>{preview?<img src={preview} alt="Foto sumber"/>:<div className="muted">Foto sumber akan muncul di sini</div>}</>}</div>
+    <div className="editorPreview">{editedImage?<img src={editedImage} alt="Hasil 3 pose 4K"/>:<>{preview?<img src={preview} alt="Foto sumber"/>:<div className="muted">Foto sumber akan muncul di sini</div>}</>}</div>
     <div className="editorControls">
      <div className="editBadge">MODE · 3 POSE</div>
      <h3>3 pose katalog</h3>
-     <p className="muted">Wajah, pakaian, proporsi dan identitas dipertahankan sebisa mungkin. Pose dibuat berbeda secara otomatis.</p>
+     <p className="muted">Wajah, pakaian, proporsi dan identitas dipertahankan sebisa mungkin. Pose dibuat berbeda secara otomatis, lalu hasil akhir di-upscale ke 4K (3840 px sisi terpanjang).</p>
      <button className="btn" disabled={editBusy||busy} onClick={editPhoto}>{editBusy?"AI sedang membuat…":"✨ EDIT JADI 3 POSE"}</button>
      <div className="status">{editStatus}</div>
-     {editedImage&&<a className="download" href={editedImage} download="affiliate-ai-3-pose.png">⬇ Download PNG</a>}
-     <div className="tiny">Menggunakan Qwen Image Edit melalui Hugging Face ZeroGPU. Gratis untuk testing, tetapi bisa antre dan memiliki kuota.</div>
+     {editedImage&&<a className="download" href={editedImage} download="affiliate-ai-3-pose-4k.png">⬇ Download PNG</a>}
+     <div className="tiny">Menggunakan Qwen Image Edit melalui Hugging Face ZeroGPU. Hasil akhir di-upscale ke resolusi 4K. Gratis untuk testing, tetapi bisa antre dan memiliki kuota.</div>
     </div>
    </div>
   </section>
