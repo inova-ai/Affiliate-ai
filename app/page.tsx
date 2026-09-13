@@ -16,21 +16,15 @@ export default function Home(){
  const toDataURL=(f:File)=>new Promise<string>((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result));r.onerror=reject;r.readAsDataURL(f)});
  async function editPhoto(){
   if(!file)return alert("Upload foto dulu.");
-  setEditBusy(true);setEditedImage("");setEditStatus("AI sedang membuat 3 pose...");
+  setEditBusy(true);setEditedImage("");setEditStatus("Menghubungkan ke Hugging Face dengan token akun server...");
   try{
-   const blob=await (await fetch(await toDataURL(file))).blob();
-   const {Client}=await import("@gradio/client");
-   const app=await Client.connect("kulkas2pintu/QWEN_EDIT_IMAGE");
-   const prompt="Create a clean three-panel fashion catalog image from this one source photo. Show the exact same person three times side by side, with the same face, hairstyle, clothing, body proportions and overall identity. Each panel must have a clearly different natural pose: 1) standing front-facing with arms relaxed, 2) standing turned slightly away with hands at the waist, 3) seated or leaning casually with one hand near the face. Keep the same outfit and a consistent simple studio background. Full-body composition, realistic photography, natural anatomy, realistic hands, consistent lighting. Do not add any other people, objects, text or watermark.";
-   const res:any=await app.predict("/edit",{
-    image:blob,prompt,lora_adapter:"",image2:null,seed:0,randomize_seed:true,
-    guidance_scale:2.5,steps:6,preserve_identity:true,identity_strength:80,
-    output_size:1536,fix_hands:true
-   });
-   const payload=res?.data?.[0] ?? res?.data ?? res;
-   const url=typeof payload==="string"?payload:(payload?.url||payload?.path||payload?.data);
-   if(!url)throw new Error("Gambar hasil edit tidak dikembalikan.");
-   setEditedImage(url);setEditStatus("3 pose selesai.");
+   const fd=new FormData();
+   fd.append("image",file);
+   const r=await fetch("/api/edit-photo",{method:"POST",body:fd});
+   const body=await r.json().catch(()=>({}));
+   if(!r.ok)throw new Error(body?.error||"Gagal memproses edit foto.");
+   if(!body?.url)throw new Error("Gambar hasil edit tidak dikembalikan.");
+   setEditedImage(body.url);setEditStatus("3 pose selesai.");
   }catch(e:any){setEditStatus("Gagal: "+(e?.message||e));}
   finally{setEditBusy(false)}
  }
