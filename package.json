@@ -10,7 +10,8 @@
     "@gradio/client": "latest",
     "next": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "sharp": "latest"
   },
   "devDependencies": {
     "@types/node": "latest",
