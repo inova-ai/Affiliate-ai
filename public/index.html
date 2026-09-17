@@ -128,40 +128,20 @@ async function uploadToRunwayDirect(file,status,label){
     if(!sr.ok||!sj.ok)throw new Error(sj.detail||sj.error||`Upload ${label} ke Vercel Blob gagal (HTTP ${sr.status}).`);
     return {pathname:sj.pathname,blobUrl:sj.url||null,contentType:sj.contentType||safeFile.type};
   }
-  // Prefer Vercel's official client upload. If the browser/CDN path rejects the
-  // request, transparently fall back to a signed private PUT. We deliberately
-  // do NOT run a browser-side HEAD verification here: the server-side Motion
-  // Transfer route verifies/reads the fresh object before sending it to Runway.
-  try{
-    const {upload}=await import("https://esm.sh/@vercel/blob@2.6.1/client");
-    const uniqueClientName=`${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
-    const blob=await upload(uniqueClientName,file,{
-      access:"private",
-      handleUploadUrl:"/api/blob/client-upload",
-      multipart:true,
-      addRandomSuffix:true,
-      contentType:file.type||"application/octet-stream",
-      clientPayload:JSON.stringify({source:"luxmotion-motion-transfer",label})
-    });
-    if(blob?.pathname){
-      status.textContent=`Upload ${label} ke Private Blob selesai.`;
-      return {pathname:blob.pathname,blobUrl:blob.url||null,contentType:blob.contentType||file.type||"application/octet-stream"};
-    }
-    throw new Error("Client upload tidak mengembalikan pathname.");
-  }catch(clientErr){
-    const detail=clientErr?.message || clientErr?.error || (typeof clientErr==="string"?clientErr:JSON.stringify(clientErr));
-    status.textContent=`Client upload gagal, mencoba jalur signed upload…`;
-    const init=await fetch("/api/blob/presign",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename:file.name,contentType:file.type||"application/octet-stream"})});
-    const ij=await init.json().catch(()=>({}));
-    if(!init.ok||!ij.ok) throw new Error(`Upload ${label} gagal. Client: ${detail}. Signed upload: ${ij.detail||ij.error||`HTTP ${init.status}`}`);
-    const up=await fetch(ij.url,{method:"PUT",headers:{"Content-Type":file.type||"application/octet-stream"},body:file});
-    if(!up.ok) {
-      const txt=await up.text().catch(()=>"");
-      throw new Error(`Upload ${label} gagal pada signed PUT (HTTP ${up.status}). ${txt.slice(0,300)}`);
-    }
-    status.textContent=`Upload ${label} ke Private Blob selesai.`;
-    return {pathname:ij.pathname,blobUrl:null,contentType:file.type||"application/octet-stream",fallback:true};
-  }
+  // Use a single deterministic path: server mints a fresh private signed PUT
+  // URL with a UUID pathname. This avoids client-token retries/replays causing
+  // Blob pathname collisions while still streaming large videos browser->Blob.
+  const init=await fetch("/api/blob/presign",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({filename:file.name,contentType:file.type||"application/octet-stream"})
+  });
+  const ij=await init.json().catch(()=>({}));
+  if(!init.ok||!ij.ok) throw new Error(ij.detail||ij.error||`Upload ${label} gagal menyiapkan signed PUT (HTTP ${init.status}).`);
+  const up=await fetch(ij.url,{method:"PUT",headers:{"Content-Type":file.type||"application/octet-stream"},body:file});
+  if(!up.ok){const txt=await up.text().catch(()=>"");throw new Error(`Upload ${label} gagal pada Private Blob PUT (HTTP ${up.status}). ${txt.slice(0,300)}`);}
+  status.textContent=`Upload ${label} ke Private Blob selesai.`;
+  return {pathname:ij.pathname,blobUrl:null,contentType:file.type||"application/octet-stream",fallback:false};
 }
 
 async function motionTransfer(){
