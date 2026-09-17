@@ -128,20 +128,19 @@ async function uploadToRunwayDirect(file,status,label){
     if(!sr.ok||!sj.ok)throw new Error(sj.detail||sj.error||`Upload ${label} ke Vercel Blob gagal (HTTP ${sr.status}).`);
     return {pathname:sj.pathname,blobUrl:sj.url||null,contentType:sj.contentType||safeFile.type};
   }
-  const init=await fetch("/api/blob/presign",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename:file.name,contentType:file.type||"application/octet-stream"})});
-  const ij=await init.json().catch(()=>({}));
-  if(!init.ok||!ij.ok)throw new Error(ij.detail||ij.error||`Gagal menyiapkan upload ${label}`);
-  const up=await fetch(ij.url,{method:"PUT",headers:{"Content-Type":file.type||"application/octet-stream"},body:file});
-  if(!up.ok)throw new Error(`Upload ${label} ke Vercel Blob gagal (HTTP ${up.status}).`);
-  status.textContent=`Memverifikasi ${label} di Vercel Blob…`;
-  let verified=false,lastVerify="";
-  for(let attempt=0;attempt<10;attempt++){
-    const vr=await fetch("/api/blob/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pathname:ij.pathname})});
-    const vj=await vr.json().catch(()=>({})); if(vr.ok&&vj.ok){verified=true;break;}
-    lastVerify=vj.error||`HTTP ${vr.status}`; await new Promise(resolve=>setTimeout(resolve,700));
-  }
-  if(!verified)throw new Error(`${label} sudah diupload tetapi Blob tidak dapat diverifikasi. ${lastVerify}`);
-  return {pathname:ij.pathname,blobUrl:ij.url,contentType:file.type||"application/octet-stream"};
+  // Use Vercel's official client-upload token exchange for large private videos.
+  // This avoids the custom presigned PUT/HEAD flow that was returning a false
+  // "object not available" verification result on the connected private store.
+  const {upload}=await import("https://esm.sh/@vercel/blob@2.6.1/client");
+  const blob=await upload(file.name,file,{
+    access:"private",
+    handleUploadUrl:"/api/blob/client-upload",
+    multipart:true,
+    clientPayload:JSON.stringify({source:"luxmotion-motion-transfer",label})
+  });
+  if(!blob?.pathname)throw new Error(`Upload ${label} ke Vercel Blob tidak mengembalikan pathname.`);
+  status.textContent=`Upload ${label} ke Private Blob selesai.`;
+  return {pathname:blob.pathname,blobUrl:blob.url||null,contentType:file.type||"application/octet-stream"};
 }
 
 async function motionTransfer(){
