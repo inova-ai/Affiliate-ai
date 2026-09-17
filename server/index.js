@@ -104,9 +104,20 @@ app.post("/api/blob/verify",async(req,res)=>{
     if(!blobConfigured()) return res.status(503).json({ok:false,error:"Vercel Blob is not configured."});
     const pathname=String(req.body?.pathname||"").trim();
     if(!pathname) return res.status(400).json({ok:false,error:"pathname is required"});
-    const meta=await waitForPrivateBlob(pathname,8,350);
-    if(!meta) return res.status(404).json({ok:false,error:"Vercel Blob upload completed but the object is not available yet.",pathname,retryable:true});
-    return res.json({ok:true,pathname,size:Number(meta.size||0),contentType:meta.contentType||null});
+    const meta=await waitForPrivateBlob(pathname,10,500);
+    if(!meta){
+      let listed=false;
+      try{
+        const {listPrivate}=await import("./blob.js");
+        const prefix=pathname.slice(0,pathname.lastIndexOf("/")+1);
+        const matches=await listPrivate(prefix,100);
+        listed=matches.some(x=>String(x.pathname||x.key||"")===pathname);
+      }catch{}
+      return res.status(404).json({ok:false,error:listed
+        ? "Blob exists in the store listing but direct verification failed."
+        : "Vercel Blob upload completed but the object is not available in the connected Blob store.",pathname,retryable:true,listed});
+    }
+    return res.json({ok:true,pathname,size:Number(meta.size||0),contentType:meta.contentType||null,etag:meta.etag||null});
   }catch(e){return res.status(503).json({ok:false,error:"Blob verification failed",detail:e.message});}
 });
 

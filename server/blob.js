@@ -37,6 +37,14 @@ export async function createPresignedPut(pathname,contentType="application/octet
   return presignedUrl;
 }
 
+export async function createPresignedHead(pathname,validMs=15*60*1000){
+  const b=requireBlob();
+  if(!b.presignUrl || !b.issueSignedToken) throw new Error("Vercel Blob signed HEAD is unavailable.");
+  const token=await b.issueSignedToken({operations:["head"]});
+  const {presignedUrl}=await b.presignUrl(token,{pathname,operation:"head",validUntil:Date.now()+validMs});
+  return presignedUrl;
+}
+
 export async function createPresignedGet(pathname,validMs=24*60*60*1000){
   const b=requireBlob();
   if(!b.presignUrl || !b.issueSignedToken) throw new Error("Vercel Blob signed read is unavailable.");
@@ -91,12 +99,27 @@ export async function headPrivate(pathname){
   }
 }
 
-export async function waitForPrivateBlob(pathname, attempts=8, delayMs=350){
+export async function waitForPrivateBlob(pathname, attempts=10, delayMs=500){
   const clean=String(pathname||"").trim();
   if(!clean) return null;
   for(let i=0;i<Math.max(1,attempts);i++){
-    const meta=await headPrivate(clean);
+    let meta=null;
+    try { meta=await headPrivate(clean); } catch {}
     if(meta) return meta;
+    // Signed HEAD is an explicit Blob operation and avoids ambiguity around
+    // SDK auth/cache resolution when the browser just completed a presigned PUT.
+    try {
+      const url=await createPresignedHead(clean,2*60*1000);
+      const r=await fetch(url,{method:"HEAD",cache:"no-store"});
+      if(r.ok){
+        return {
+          pathname:clean,
+          size:Number(r.headers.get("content-length")||0),
+          contentType:r.headers.get("content-type")||null,
+          etag:r.headers.get("etag")||null
+        };
+      }
+    } catch {}
     if(i<attempts-1) await new Promise(r=>setTimeout(r,delayMs));
   }
   return null;
