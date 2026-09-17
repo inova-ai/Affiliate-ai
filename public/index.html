@@ -108,9 +108,24 @@ async function motionTransfer(){
    status.textContent="Memindahkan asset Blob ke upload ephemeral Runway…";
    const r=await fetch("/api/motion-transfer/runway",{method:"POST",headers:runwayHeaders(),body:JSON.stringify({sourceImagePath:imageAsset.pathname,sourceImageName:image.name,motionReferencePath:videoAsset.pathname,motionReferenceName:video.name,prompt:$("motionPrompt").value,duration:Number($("motionDuration").value),format:$("motionFormat").value,audio:$("motionAudio").checked})});
    const j=await r.json().catch(()=>({})); if(!r.ok||!j.ok) throw new Error(j.detail||j.error||"Motion transfer gagal");
-   const url=j.durableOutput|| (Array.isArray(j.output)?j.output.find(x=>typeof x==="string"&&/^https?:\/\//.test(x)):null);
-   if(url){out.src=url;out.style.display="block";out.load();status.innerHTML='<span class="ok">Selesai.</span> Video hasil sudah siap diputar.';} else status.textContent="Render selesai tetapi provider tidak mengembalikan URL video yang dapat diputar.";
    $("job").textContent=JSON.stringify(j,null,2);
+   if(!j.taskId) throw new Error("Runway tidak mengembalikan taskId.");
+   status.textContent="Runway sedang memproses Motion Transfer…";
+   for(let attempt=0;attempt<72;attempt++){
+     await new Promise(resolve=>setTimeout(resolve,5000));
+     const sr=await fetch(`/api/motion-transfer/runway/status/${encodeURIComponent(j.taskId)}`,{headers:runwayHeaders(false)});
+     const sj=await sr.json().catch(()=>({}));
+     $("job").textContent=JSON.stringify(sj,null,2);
+     if(!sr.ok) throw new Error(sj.detail||sj.error||`Status HTTP ${sr.status}`);
+     if(sj.status==="failed"||sj.status==="canceled") throw new Error(sj.detail?.failure||sj.detail?.error||"Runway Motion Transfer gagal.");
+     if(sj.status==="completed"){
+       const url=sj.durableOutput|| (Array.isArray(sj.output)?sj.output.find(x=>typeof x==="string"&&/^https?:\/\//.test(x)):null);
+       if(url){out.src=url;out.style.display="block";out.load();status.innerHTML='<span class="ok">Selesai.</span> Video hasil sudah siap diputar.';} else status.textContent="Render selesai tetapi provider tidak mengembalikan URL video yang dapat diputar.";
+       return;
+     }
+     status.textContent=`Runway memproses Motion Transfer… ${attempt+1}/72`;
+   }
+   throw new Error("Timeout menunggu hasil Runway (6 menit). Task tetap dapat dicek dengan taskId: "+j.taskId);
  }catch(e){status.textContent="Error: "+e.message;$("job").textContent=e.message} finally{btn.disabled=false}
 }
 
