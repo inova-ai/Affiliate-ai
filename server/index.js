@@ -75,7 +75,7 @@ app.post("/api/blob/read-url",async(req,res)=>{
   try{
     if(!blobConfigured()) return res.status(503).json({ok:false,error:"Vercel Blob is not configured."});
     const pathname=String(req.body?.pathname||"").trim(); if(!pathname) return res.status(400).json({ok:false,error:"pathname is required"});
-    const url=await createPresignedGet(pathname); res.json({ok:true,url});
+    const url=await createPresignedGet(pathname); res.json({ok:true,url,note:"Browser GET only. For Runway inputs use a Blob pathname with /api/motion-transfer/runway; Runway probes URLs with HEAD."});
   }catch(e){res.status(503).json({ok:false,error:"Blob read URL failed",detail:e.message});}
 });
 
@@ -103,8 +103,12 @@ app.post("/api/upload-from-url",async(req,res)=>{
       await downloadToFile(url,file);
     }else return res.status(400).json({ok:false,error:"A Blob pathname or public HTTPS asset URL is required."});
     const profile=await createProfile({file,kind,originalName,metadata:{name:req.body?.name||""},runwayUri:null});
-    const runwayUrl=requestRunwayKey(req)?await profilePrimaryUrl(profile):null;
-    const runway=runwayUrl?{ok:true,uri:runwayUrl,source:"vercel-blob-signed-url",expiresInMinutes:30}:null;
+    let runway=null;
+    if(requestRunwayKey(req)){
+      const up=await uploadEphemeral(file,originalName,requestRunwayKey(req));
+      if(up.ok) runway={ok:true,uri:up.uri,source:"runway-ephemeral-upload",expiresInHours:24};
+      else runway={ok:false,source:"runway-ephemeral-upload",error:up};
+    }
     res.json({ok:true,files:{asset:{path:file,originalName,mimeType:req.body?.mimeType||"application/octet-stream",size:fs.statSync(file).size,runway}},profile});
   }catch(e){res.status(502).json({ok:false,error:"Remote asset import failed",detail:e.message});}
 });
@@ -175,6 +179,23 @@ async function validateMotionReference(file){
  catch(e){ if(e.code==="ENOENT") return {warning:"ffprobe tidak tersedia; validasi resolusi/durasi dilewati."}; throw e; }
 }
 
+function safeAssetName(name,fallback){
+ const base=path.basename(String(name||fallback||"asset.bin"));
+ return base.replace(/[^a-zA-Z0-9._-]/g,"_") || fallback;
+}
+
+async function normalizeRunwayImage(input, output){
+ const ffmpeg=ffmpegPath();
+ await execFileAsync(ffmpeg,["-y","-i",input,"-frames:v","1","-vf","scale=min(2048\,iw):-2","-q:v","2",output],{timeout:60000});
+ return output;
+}
+
+async function normalizeRunwayVideo(input, output){
+ const ffmpeg=ffmpegPath();
+ await execFileAsync(ffmpeg,["-y","-i",input,"-vf","scale=min(1280\,iw):-2","-c:v","libx264","-preset","veryfast","-crf","20","-pix_fmt","yuv420p","-c:a","aac","-b:a","128k","-movflags","+faststart",output],{timeout:180000});
+ return output;
+}
+
 async function createRunwayEphemeralUpload(filename, contentType="application/octet-stream", apiKey){
  const safe=String(filename||"asset.bin").replace(/[^a-zA-Z0-9._-]/g,"_");
  if(!blobConfigured()) return {ok:false,code:"BLOB_REQUIRED",message:"Vercel Blob must be connected for direct browser uploads."};
@@ -197,9 +218,51 @@ app.post('/api/runway/test',async(req,res)=>{
 
 app.post("/api/motion-transfer/runway",async(req,res)=>{
  const b=req.body||{};
- if(!b.sourceImageUri||!b.motionReferenceUri) return res.status(400).json({ok:false,error:"sourceImageUri and motionReferenceUri are required"});
+ const sourcePath=String(b.sourceImagePath||"").trim();
+ const referencePath=String(b.motionReferencePath||"").trim();
+ if((!sourcePath && !b.sourceImageUri)||(!referencePath && !b.motionReferenceUri)) return res.status(400).json({ok:false,error:"sourceImagePath/sourceImageUri and motionReferencePath/motionReferenceUri are required"});
+ let tmpImage=null,tmpVideo=null;
  try{
-   const result=await runwayMotionTransfer({promptImage:String(b.sourceImageUri),referenceVideo:String(b.motionReferenceUri),promptText:String(b.prompt||"").slice(0,15000),duration:Number(b.duration||5),format:b.format||"9:16",audio:Boolean(b.audio),apiKey:requestRunwayKey(req)});
+   let promptImage=String(b.sourceImageUri||"").trim();
+   let referenceVideo=String(b.motionReferenceUri||"").trim();
+   // Runway requires external asset URLs to answer both HEAD and GET. A Vercel
+   // Blob presigned GET URL is scoped to GET only, so Runway's mandatory HEAD
+   // probe can reject it. For Blob path inputs, bridge the private object through
+   // Runway's own ephemeral upload API instead. This keeps the Blob private and
+   // avoids exposing storage credentials.
+   let bridgeMeta={};
+   if(sourcePath || referencePath){
+     if(!blobConfigured()) return res.status(503).json({ok:false,error:"Vercel Blob is required for Blob-backed Runway assets."});
+     const {downloadPrivateToFile}=await import("./blob.js");
+     if(sourcePath){
+       const sourceName=safeAssetName(b.sourceImageName,path.extname(sourcePath)||"source-image.jpg");
+       const sourceExt=path.extname(sourceName).toLowerCase();
+       const rawImage=path.join(uploadDir,`runway-${crypto.randomUUID()}-image${sourceExt||".bin"}`);
+       const normalizedImage=path.join(uploadDir,`runway-${crypto.randomUUID()}-image.jpg`);
+       await downloadPrivateToFile(sourcePath,rawImage);
+       await normalizeRunwayImage(rawImage,normalizedImage);
+       const up=await uploadEphemeral(normalizedImage,"source-image.jpg",requestRunwayKey(req));
+       if(!up.ok) return res.status(502).json({ok:false,error:"Source image transfer to Runway failed",detail:up});
+       promptImage=up.uri;
+       bridgeMeta.sourceImage={name:sourceName,bytes:fs.statSync(normalizedImage).size,uriType:String(up.uri||"").split(":")[0]};
+       await Promise.all([fs.promises.unlink(rawImage).catch(()=>{}),fs.promises.unlink(normalizedImage).catch(()=>{})]);
+     }
+     if(referencePath){
+       const referenceName=safeAssetName(b.motionReferenceName,path.extname(referencePath)||"motion-reference.mp4");
+       const rawVideo=path.join(uploadDir,`runway-${crypto.randomUUID()}-motion${path.extname(referenceName)||".bin"}`);
+       const normalizedVideo=path.join(uploadDir,`runway-${crypto.randomUUID()}-motion.mp4`);
+       await downloadPrivateToFile(referencePath,rawVideo);
+       const motionMeta=await validateMotionReference(rawVideo);
+       await normalizeRunwayVideo(rawVideo,normalizedVideo);
+       const normalizedMeta=await validateMotionReference(normalizedVideo);
+       const up=await uploadEphemeral(normalizedVideo,"motion-reference.mp4",requestRunwayKey(req));
+       if(!up.ok) return res.status(502).json({ok:false,error:"Motion reference transfer to Runway failed",detail:up});
+       referenceVideo=up.uri;
+       bridgeMeta.motionReference={name:referenceName,sourceMeta:motionMeta,normalizedMeta,bytes:fs.statSync(normalizedVideo).size,uriType:String(up.uri||"").split(":")[0]};
+       await Promise.all([fs.promises.unlink(rawVideo).catch(()=>{}),fs.promises.unlink(normalizedVideo).catch(()=>{})]);
+     }
+   }
+   const result=await runwayMotionTransfer({promptImage,referenceVideo,promptText:String(b.prompt||"").slice(0,15000),duration:Number(b.duration||5),format:b.format||"9:16",audio:Boolean(b.audio),apiKey:requestRunwayKey(req)});
    if(result.ok && Array.isArray(result.output) && result.output[0] && blobConfigured()){
      try{
        const local=path.join(renderDir,`motion-${crypto.randomUUID()}.mp4`);
@@ -208,8 +271,11 @@ app.post("/api/motion-transfer/runway",async(req,res)=>{
        if(durable) result.durableOutput=durable;
      }catch(e){ result.persistenceWarning=`Motion result could not be copied to Blob: ${e.message}`; }
    }
-   res.status(result.ok?200:502).json(result);
+   res.status(result.ok?200:502).json({...result,bridgeMeta});
  }catch(e){res.status(502).json({ok:false,error:"Motion transfer failed",detail:e.message});}
+ finally{
+   for(const f of [tmpImage,tmpVideo]) if(f){try{await fs.promises.unlink(f)}catch{}}
+ }
 });
 
 app.post("/api/motion-transfer",motionUpload.fields([

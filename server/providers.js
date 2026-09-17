@@ -1,6 +1,17 @@
 import RunwayML, { TaskFailedError, toFile } from "@runwayml/sdk";
 import fs from "fs";
 
+function mimeForFilename(name="") {
+  const ext=String(name).toLowerCase().split(".").pop();
+  return ({jpg:"image/jpeg",jpeg:"image/jpeg",png:"image/png",webp:"image/webp",mp4:"video/mp4",webm:"video/webm",mov:"video/quicktime"})[ext] || "application/octet-stream";
+}
+
+function runwayFile(data,filename){
+  const mime=mimeForFilename(filename);
+  try { return new File([data], filename, {type:mime}); }
+  catch { return toFile(data, filename); }
+}
+
 export const MODEL_CATALOG = {
   runway: {
     economy:{label:"Hemat",model:"gen4_turbo",creditsPerSecond:5},
@@ -33,7 +44,9 @@ export async function uploadEphemeral(filePath,originalName,apiKey){
   if(size<512) return {ok:false,code:"FILE_TOO_SMALL",message:"Runway ephemeral uploads require at least 512 bytes."};
   if(size>200*1024*1024) return {ok:false,code:"FILE_TOO_LARGE",message:"Runway ephemeral uploads are limited to 200MB."};
   try{
-    const response=await client(apiKey).uploads.createEphemeral(fs.createReadStream(filePath));
+    const data=await fs.promises.readFile(filePath);
+    const filename=String(originalName||"asset.bin").replace(/[^a-zA-Z0-9._-]/g,"_");
+    const response=await client(apiKey).uploads.createEphemeral(runwayFile(data,filename));
     return {ok:true,uri:response.uri,expiresInHours:24,originalName};
   }catch(error){
     return {ok:false,code:"RUNWAY_UPLOAD_FAILED",detail:error.message};
@@ -43,7 +56,7 @@ export async function uploadEphemeral(filePath,originalName,apiKey){
 export async function uploadBufferEphemeral(buffer,filename="asset.bin",apiKey){
   if(!key(apiKey)) return {ok:false,code:"RUNWAY_API_KEY_MISSING"};
   try{
-    const response=await client(apiKey).uploads.createEphemeral(await toFile(buffer,filename));
+    const response=await client(apiKey).uploads.createEphemeral(runwayFile(buffer,filename));
     return {ok:true,uri:response.uri,expiresInHours:24,originalName:filename};
   }catch(error){return {ok:false,code:"RUNWAY_UPLOAD_FAILED",detail:error.message};}
 }
