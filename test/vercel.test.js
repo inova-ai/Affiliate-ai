@@ -15,13 +15,15 @@ test("Vercel Express entrypoint and function contract are present",()=>{
   for(const dep of ["@vercel/blob","ffmpeg-static","ffprobe-static","@runwayml/sdk"]) assert.ok(pkg.dependencies[dep],`${dep} dependency missing`);
 });
 
-test("large browser uploads avoid Vercel's server payload path",()=>{
+test("large private browser uploads use Vercel's official client upload path",()=>{
   const html=fs.readFileSync("public/index.html","utf8");
   const server=fs.readFileSync("server/index.js","utf8");
-  assert.match(html,/\/api\/blob\/presign/);
-  assert.match(html,/method:"PUT"/);
-  assert.match(server,/\/api\/blob\/presign/);
-  assert.match(server,/\/api\/upload-from-url/);
+  assert.match(html,/https:\/\/esm\.sh\/@vercel\/blob@2\.6\.1\/client/);
+  assert.match(html,/handleUploadUrl:"\/api\/blob\/client-upload"/);
+  assert.match(html,/access:"private"/);
+  assert.match(html,/multipart:true/);
+  assert.match(server,/\/api\/blob\/client-upload/);
+  assert.match(server,/handleUpload/);
 });
 
 test("Vercel auto-production does not rely on fire-and-forget work",()=>{
@@ -55,12 +57,14 @@ test("Health exposes real Blob reachability and durable persistence state",()=>{
 });
 
 
-test('Blob upload flow verifies the exact pathname before using it', async()=>{
+test('Large private video upload uses official Vercel client upload and server-side pathname verification', async()=>{
   const s=fs.readFileSync('server/index.js','utf8');
   const h=fs.readFileSync('public/index.html','utf8');
-  assert.match(s,/app\.post\("\/api\/blob\/verify"/);
+  assert.match(s,/handleUpload/);
+  assert.match(s,/\/api\/blob\/client-upload/);
   assert.match(s,/waitForPrivateBlob/);
-  assert.match(h,/\/api\/blob\/verify/);
+  assert.match(h,/handleUploadUrl:"\/api\/blob\/client-upload"/);
+  assert.match(h,/access:"private"/);
 });
 
 test('Blob not-found errors are normalized instead of leaking SDK exception', async()=>{
