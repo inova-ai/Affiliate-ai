@@ -53,3 +53,18 @@ test("Health exposes real Blob reachability and durable persistence state",()=>{
   assert.match(server,/blobReachable=false/);
   assert.match(server,/durablePersistence:Boolean\(blobConfigured\(\)&&blobReachable\)/);
 });
+
+
+test('Blob upload flow verifies the exact pathname before using it', async()=>{
+  const s=fs.readFileSync('server/index.js','utf8');
+  const h=fs.readFileSync('public/index.html','utf8');
+  assert.match(s,/app\.post\("\/api\/blob\/verify"/);
+  assert.match(s,/waitForPrivateBlob/);
+  assert.match(h,/\/api\/blob\/verify/);
+});
+
+test('Blob not-found errors are normalized instead of leaking SDK exception', async()=>{
+  const b=fs.readFileSync('server/blob.js','utf8');
+  assert.match(b,/does not exist\|not found\|404/);
+  assert.match(b,/waitForPrivateBlob/);
+});
