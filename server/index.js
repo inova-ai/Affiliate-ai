@@ -10,7 +10,7 @@ import {fileURLToPath} from "url";
 import {execFile} from "child_process";
 import {promisify} from "util";
 import {ffmpegPath, ffprobePath, mediaToolInfo} from "./media-tools.js";
-import {blobConfigured, blobAuthInfo, createPresignedPut, createPresignedGet, publishFile, signedUrl, headPrivate, readPrivate, downloadPrivateToFile} from "./blob.js";
+import {blobConfigured, blobAuthInfo, createPresignedPut, createPresignedGet, publishFile, signedUrl, headPrivate, waitForPrivateBlob, readPrivate, downloadPrivateToFile} from "./blob.js";
 import {buildStoryboard} from "./storyboard.js";
 import {routeModel,estimate,runwayRender,runwayMotionTransfer,runwayMotionCreate,runwayMotionStatus,uploadEphemeral} from "./providers.js";
 import {renderProject,makeConcatList} from "./pipeline.js";
@@ -97,6 +97,17 @@ app.post("/api/blob/read-url",async(req,res)=>{
     const pathname=String(req.body?.pathname||"").trim(); if(!pathname) return res.status(400).json({ok:false,error:"pathname is required"});
     const url=await createPresignedGet(pathname); res.json({ok:true,url,note:"Browser GET only. For Runway inputs use a Blob pathname with /api/motion-transfer/runway; Runway probes URLs with HEAD."});
   }catch(e){res.status(503).json({ok:false,error:"Blob read URL failed",detail:e.message});}
+});
+
+app.post("/api/blob/verify",async(req,res)=>{
+  try{
+    if(!blobConfigured()) return res.status(503).json({ok:false,error:"Vercel Blob is not configured."});
+    const pathname=String(req.body?.pathname||"").trim();
+    if(!pathname) return res.status(400).json({ok:false,error:"pathname is required"});
+    const meta=await waitForPrivateBlob(pathname,8,350);
+    if(!meta) return res.status(404).json({ok:false,error:"Vercel Blob upload completed but the object is not available yet.",pathname,retryable:true});
+    return res.json({ok:true,pathname,size:Number(meta.size||0),contentType:meta.contentType||null});
+  }catch(e){return res.status(503).json({ok:false,error:"Blob verification failed",detail:e.message});}
 });
 
 app.post("/api/runway/upload-init",async(req,res)=>{
@@ -276,7 +287,8 @@ app.post("/api/motion-transfer/runway",async(req,res)=>{
      // guarantees explicit filenames/content types via SDK toFile().
      if(sourcePath){
        if(!blobConfigured()) return res.status(503).json({ok:false,error:"Vercel Blob is required for Blob-backed Runway assets."});
-       const meta=await headPrivate(sourcePath);
+       const meta=await waitForPrivateBlob(sourcePath,8,350);
+       if(!meta) return res.status(404).json({ok:false,error:"Source image Blob does not exist or is not available yet.",pathname:sourcePath});
        const contentType=String(meta?.contentType||"");
        if(!/^image\/(jpeg|png|webp)$/.test(contentType)) return res.status(400).json({ok:false,error:"Source image Blob has unsupported Content-Type",detail:{contentType}});
        const ext=contentType==="image/png"?".png":contentType==="image/webp"?".webp":".jpg";
@@ -289,7 +301,8 @@ app.post("/api/motion-transfer/runway",async(req,res)=>{
      }
      if(referencePath){
        if(!blobConfigured()) return res.status(503).json({ok:false,error:"Vercel Blob is required for Blob-backed Runway assets."});
-       const meta=await headPrivate(referencePath);
+       const meta=await waitForPrivateBlob(referencePath,8,350);
+       if(!meta) return res.status(404).json({ok:false,error:"Motion reference Blob does not exist or is not available yet.",pathname:referencePath});
        const contentType=String(meta?.contentType||"");
        if(!/^video\/(mp4|quicktime|webm|x-matroska|3gpp|ogg|x-msvideo|mpeg)$/.test(contentType)) return res.status(400).json({ok:false,error:"Motion reference Blob has unsupported Content-Type",detail:{contentType}});
        const ext=contentType==="video/quicktime"?".mov":contentType==="video/webm"?".webm":contentType==="video/x-matroska"?".mkv":".mp4";

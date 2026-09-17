@@ -75,16 +75,46 @@ export async function putPrivateFile(filePath,pathname,contentType="application/
 }
 
 export async function headPrivate(pathname){
+  const clean=String(pathname||"").trim();
+  if(!clean) return null;
   const b=requireBlob();
   if(!b.head) throw new Error("Vercel Blob head() is unavailable. Update @vercel/blob.");
-  return await b.head(pathname);
+  try{
+    return await b.head(clean);
+  }catch(e){
+    // Vercel Blob throws when the object is genuinely missing. Normalize that
+    // case so callers can return a useful 404/409 instead of leaking the SDK
+    // error text. Other authentication/network errors are preserved.
+    const msg=String(e?.message||e||"");
+    if(/does not exist|not found|404/i.test(msg)) return null;
+    throw e;
+  }
+}
+
+export async function waitForPrivateBlob(pathname, attempts=8, delayMs=350){
+  const clean=String(pathname||"").trim();
+  if(!clean) return null;
+  for(let i=0;i<Math.max(1,attempts);i++){
+    const meta=await headPrivate(clean);
+    if(meta) return meta;
+    if(i<attempts-1) await new Promise(r=>setTimeout(r,delayMs));
+  }
+  return null;
 }
 
 export async function readPrivate(pathname){
+  const clean=String(pathname||"").trim();
+  if(!clean) return null;
   const b=requireBlob();
-  const result=await b.get(pathname,{access:"private",useCache:false});
-  if(!result) return null;
-  return result;
+  try{
+    const result=await b.get(clean,{access:"private",useCache:false});
+    if(!result) return null;
+    return result;
+  }catch(e){
+    const msg=String(e?.message||e||"");
+    if(/does not exist|not found|404/i.test(msg)) return null;
+    throw e;
+  }
 }
 
 export async function readPrivateJson(pathname){
