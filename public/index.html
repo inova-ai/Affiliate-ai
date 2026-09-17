@@ -138,6 +138,7 @@ async function uploadToRunwayDirect(file,status,label){
       access:"private",
       handleUploadUrl:"/api/blob/client-upload",
       multipart:true,
+      addRandomSuffix:true,
       contentType:file.type||"application/octet-stream",
       clientPayload:JSON.stringify({source:"luxmotion-motion-transfer",label})
     });
