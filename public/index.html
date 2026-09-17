@@ -134,7 +134,8 @@ async function uploadToRunwayDirect(file,status,label){
   // Transfer route verifies/reads the fresh object before sending it to Runway.
   try{
     const {upload}=await import("https://esm.sh/@vercel/blob@2.6.1/client");
-    const blob=await upload(file.name,file,{
+    const uniqueClientName=`${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
+    const blob=await upload(uniqueClientName,file,{
       access:"private",
       handleUploadUrl:"/api/blob/client-upload",
       multipart:true,
