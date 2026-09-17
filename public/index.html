@@ -104,23 +104,43 @@ function clearRunwayKey(){sessionStorage.removeItem("luxmotion_runway_key");if($
 async function testRunwayConnection(){const k=getRunwayKey();const st=$("runwayManagerStatus"),btn=$("runwayTestBtn");if(!k){st.textContent="Masukkan API key Runway dulu.";return}sessionStorage.setItem("luxmotion_runway_key",k);btn.disabled=true;st.textContent="Mengecek koneksi Runway…";try{const r=await fetch("/api/runway/test",{method:"POST",headers:runwayHeaders(),body:JSON.stringify({})});const j=await r.json().catch(()=>({}));if(!r.ok||!j.ok)throw new Error(j.detail||j.error||`HTTP ${r.status}`);st.innerHTML='<span class="ok">● Connected</span> — Runway API bisa diakses.';$("api").innerHTML='<span class="ok">Runway connected</span>';}catch(e){st.innerHTML='<span class="warn">● Connection error:</span> '+e.message;$("api").innerHTML='<span class="warn">Runway error</span>';}finally{btn.disabled=false}}
 (function(){const k=sessionStorage.getItem("luxmotion_runway_key");if(k&&$("runwayApiKey")){$("runwayApiKey").value=k;$("runwayManagerStatus").innerHTML='<span class="ok">API key tersedia untuk sesi browser ini.</span>'}})();
 
+async function compressImageForServerUpload(file,maxBytes=3.5*1024*1024){
+  if(!file.type||!file.type.startsWith("image/")||file.size<=maxBytes) return file;
+  const bitmap=await createImageBitmap(file);
+  let w=bitmap.width,h=bitmap.height; const maxDim=2400;
+  if(Math.max(w,h)>maxDim){const scale=maxDim/Math.max(w,h);w=Math.round(w*scale);h=Math.round(h*scale);}
+  const canvas=document.createElement("canvas"); canvas.width=w; canvas.height=h;
+  const ctx=canvas.getContext("2d"); ctx.drawImage(bitmap,0,0,w,h); bitmap.close?.();
+  let quality=0.88, blob=null;
+  for(let i=0;i<6;i++){blob=await new Promise(resolve=>canvas.toBlob(resolve,"image/jpeg",quality));if(blob&&blob.size<=maxBytes)break;quality-=0.10;}
+  if(!blob||blob.size>maxBytes)throw new Error(`${file.name} terlalu besar untuk upload server setelah kompresi.`);
+  return new File([blob],file.name.replace(/\.[^.]+$/i,".jpg"),{type:"image/jpeg",lastModified:Date.now()});
+}
+
 async function uploadToRunwayDirect(file,status,label){
   status.textContent=`Mengupload ${label} ke Vercel Blob…`;
+  // Photos always use a server-side Blob PUT; no browser presigned PUT/verify race.
+  if(file.type&&file.type.startsWith("image/")){
+    const safeFile=await compressImageForServerUpload(file);
+    const fd=new FormData(); fd.append("file",safeFile,safeFile.name);
+    const sr=await fetch("/api/blob/upload",{method:"POST",body:fd});
+    const sj=await sr.json().catch(()=>({}));
+    if(!sr.ok||!sj.ok)throw new Error(sj.detail||sj.error||`Upload ${label} ke Vercel Blob gagal (HTTP ${sr.status}).`);
+    return {pathname:sj.pathname,blobUrl:sj.url||null,contentType:sj.contentType||safeFile.type};
+  }
   const init=await fetch("/api/blob/presign",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename:file.name,contentType:file.type||"application/octet-stream"})});
   const ij=await init.json().catch(()=>({}));
-  if(!init.ok||!ij.ok) throw new Error(ij.detail||ij.error||`Gagal menyiapkan upload ${label}`);
+  if(!init.ok||!ij.ok)throw new Error(ij.detail||ij.error||`Gagal menyiapkan upload ${label}`);
   const up=await fetch(ij.url,{method:"PUT",headers:{"Content-Type":file.type||"application/octet-stream"},body:file});
-  if(!up.ok) throw new Error(`Upload ${label} ke Vercel Blob gagal (HTTP ${up.status}).`);
+  if(!up.ok)throw new Error(`Upload ${label} ke Vercel Blob gagal (HTTP ${up.status}).`);
   status.textContent=`Memverifikasi ${label} di Vercel Blob…`;
   let verified=false,lastVerify="";
   for(let attempt=0;attempt<10;attempt++){
     const vr=await fetch("/api/blob/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pathname:ij.pathname})});
-    const vj=await vr.json().catch(()=>({}));
-    if(vr.ok&&vj.ok){verified=true;break;}
-    lastVerify=vj.error||`HTTP ${vr.status}`;
-    await new Promise(resolve=>setTimeout(resolve,700));
+    const vj=await vr.json().catch(()=>({})); if(vr.ok&&vj.ok){verified=true;break;}
+    lastVerify=vj.error||`HTTP ${vr.status}`; await new Promise(resolve=>setTimeout(resolve,700));
   }
-  if(!verified) throw new Error(`${label} sudah diupload tetapi Blob tidak dapat diverifikasi. ${lastVerify}`);
+  if(!verified)throw new Error(`${label} sudah diupload tetapi Blob tidak dapat diverifikasi. ${lastVerify}`);
   return {pathname:ij.pathname,blobUrl:ij.url,contentType:file.type||"application/octet-stream"};
 }
 
@@ -167,35 +187,21 @@ async function creativeKit(){let r=await fetch("/api/creative-kit",{method:"POST
 async function uploadAsset(){
  const f=$("asset").files[0]; if(!f){$("job").textContent="Pilih file gambar dulu.";return}
  if(!/^image\/(jpeg|png|webp)$/.test(f.type)){$("job").textContent="Asset harus JPG, PNG, atau WebP.";return}
- $("job").textContent="Mengupload asset langsung ke Vercel Blob…";
+ $("job").textContent="Mengupload asset ke Vercel Blob…";
  try{
-   const pr=await fetch("/api/blob/presign",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename:f.name,contentType:f.type})});
-   const pj=await pr.json().catch(()=>({}));
-   if(!pr.ok||!pj.ok) throw new Error(pj.detail||pj.error||"Vercel Blob belum terhubung");
-   const put=await fetch(pj.url,{method:"PUT",headers:{"Content-Type":f.type},body:f});
-   if(!put.ok) throw new Error(`Upload ke Blob gagal (HTTP ${put.status})`);
-   let verified=false,lastVerify="";
-   for(let attempt=0;attempt<10;attempt++){
-     const verify=await fetch("/api/blob/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pathname:pj.pathname})});
-     const vj=await verify.json().catch(()=>({}));
-     if(verify.ok&&vj.ok){verified=true;break;}
-     lastVerify=vj.error||`HTTP ${verify.status}`;
-     await new Promise(resolve=>setTimeout(resolve,700));
-   }
-   if(!verified) throw new Error(`Blob belum dapat diverifikasi: ${lastVerify}`);
-   const r=await fetch("/api/upload-from-url",{method:"POST",headers:runwayHeaders(),body:JSON.stringify({pathname:pj.pathname,originalName:f.name,mimeType:f.type,kind:"product",name:$("product").value||""})});
-   const j=await r.json().catch(()=>({})); if(!r.ok||!j.ok) throw new Error(j.detail||j.error||"Gagal membuat reference profile");
-   const item=j.files?.asset, uri=item?.runway?.uri||pj.url;
-   $("imageUrl").value=uri;
+   const safeFile=await compressImageForServerUpload(f);
+   const fd=new FormData(); fd.append("file",safeFile,safeFile.name);
+   const sr=await fetch("/api/blob/upload",{method:"POST",body:fd});
+   const sj=await sr.json().catch(()=>({}));
+   if(!sr.ok||!sj.ok)throw new Error(sj.detail||sj.error||`Upload Blob gagal HTTP ${sr.status}`);
+   const r=await fetch("/api/upload-from-url",{method:"POST",headers:runwayHeaders(),body:JSON.stringify({pathname:sj.pathname,originalName:safeFile.name,mimeType:safeFile.type,kind:"product",name:$("product").value||""})});
+   const j=await r.json().catch(()=>({})); if(!r.ok||!j.ok)throw new Error(j.detail||j.error||"Gagal membuat reference profile");
+   const item=j.files?.asset, uri=item?.runway?.uri||sj.url||""; $("imageUrl").value=uri;
    if(j.profile?.id){$("productProfileId").value=j.profile.id; $("assetGate").textContent=`Reference profile aktif: ${j.profile.id} • ${j.profile.qualityGate?.width||0}x${j.profile.qualityGate?.height||0}`;}
    $("job").textContent=JSON.stringify(j,null,2);
- }catch(e){
-   if(f.size<=3*1024*1024){
-     try{const fd=new FormData();fd.append("product",f);const r=await fetch("/api/upload",{method:"POST",headers:runwayHeaders(false),body:fd});const j=await r.json().catch(()=>({}));if(!r.ok||!j.ok)throw new Error(j.detail||j.error||"Upload fallback gagal");const item=j.files?.product;$("imageUrl").value=item?.runway?.uri||"";if(item?.profile?.id)$("productProfileId").value=item.profile.id;$("job").textContent=JSON.stringify(j,null,2);return;}catch(fallback){e=fallback}
-   }
-   $("job").textContent="Upload error: "+e.message+". Untuk file besar, hubungkan Vercel Blob pada project.";
- }
+ }catch(e){$("job").textContent="Upload error: "+e.message+". Foto akan dikompres otomatis agar tetap memakai server-side Blob upload.";}
 }
+
 async function deliver4K(){
  const url=$("imageUrl").value; if(!url){$("job").textContent="Masukkan URL/hasil render lokal terlebih dahulu.";return}
  $("job").textContent="4K delivery membutuhkan file video lokal hasil render. Gunakan endpoint /api/deliver-4k dari pipeline server.";
