@@ -1,0 +1,8 @@
+V10 Visual AI QC
+
+New API:
+POST /api/qc-visual {file, referenceImage?, product?, character?, prompt?, fps?, maxFrames?}
+POST /api/qc-visual-retry {qc, attempt?, maxRetries?}
+
+Set VISION_QC_URL and optional VISION_QC_API_KEY to activate semantic vision inspection.
+Without it, the result is technical-only/manual-review rather than a fake semantic pass.

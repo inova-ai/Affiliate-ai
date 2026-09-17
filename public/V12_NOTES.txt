@@ -1,0 +1,3 @@
+LUXMOTION AI v12
+AUTO PRODUCTION:
+upload -> render -> technical QC -> optional semantic QC -> retry -> compose -> master QC -> 4K delivery.
