@@ -2,19 +2,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 
-test('motion upload path uses Vercel Blob signed HTTPS URLs instead of browser Runway upload-init', async()=>{
+test('motion upload path uses Vercel Blob and server-side Runway ephemeral upload instead of browser Runway upload-init', async()=>{
   const h=await fs.readFile('public/index.html','utf8');
   assert.match(h,/\/api\/blob\/presign/);
-  assert.match(h,/\/api\/blob\/read-url/);
-  assert.match(h,/return rj\.url/);
+  assert.doesNotMatch(h,/\/api\/blob\/read-url/);
+  assert.match(h,/sourceImagePath/);
+  assert.match(h,/motionReferencePath/);
   assert.doesNotMatch(h,/\/api\/runway\/upload-init/);
 });
 
-test('server Blob bridge creates signed URLs for Runway inputs', async()=>{
+test('server Blob bridge transfers private Blob paths to Runway ephemeral uploads', async()=>{
   const s=await fs.readFile('server/index.js','utf8');
-  assert.match(s,/profilePrimaryUrl/);
-  assert.match(s,/source:"vercel-blob-signed-url"/);
-  assert.match(s,/createPresignedGet/);
+  assert.match(s,/downloadPrivateToFile/);
+  assert.match(s,/uploadEphemeral\(normalizedImage/);
+  assert.match(s,/uploadEphemeral\(normalizedVideo/);
+  assert.match(s,/sourceImageName/);
+  assert.match(s,/motionReferenceName/);
 });
 
 test('durable media publish returns Blob metadata used for pathname persistence', async()=>{
