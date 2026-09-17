@@ -4,10 +4,8 @@ import fs from 'node:fs/promises';
 
 test('motion upload path uses Vercel Blob and server-side HTTPS bridge instead of browser Runway upload-init', async()=>{
   const h=await fs.readFile('public/index.html','utf8');
-  assert.match(h,/https:\/\/esm\.sh\/@vercel\/blob@2\.6\.1\/client/);
-  assert.match(h,/handleUploadUrl:"\/api\/blob\/client-upload"/);
-  assert.match(h,/access:"private"/);
-  assert.match(h,/multipart:true/);
+  assert.match(h,/\/api\/blob\/presign/);
+  assert.match(h,/method:"PUT"/);
   assert.doesNotMatch(h,/\/api\/blob\/read-url/);
   assert.match(h,/sourceImagePath/);
   assert.match(h,/motionReferencePath/);

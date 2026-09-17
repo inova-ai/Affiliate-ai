@@ -15,15 +15,13 @@ test("Vercel Express entrypoint and function contract are present",()=>{
   for(const dep of ["@vercel/blob","ffmpeg-static","ffprobe-static","@runwayml/sdk"]) assert.ok(pkg.dependencies[dep],`${dep} dependency missing`);
 });
 
-test("large private browser uploads use Vercel's official client upload path",()=>{
+test("large private browser uploads use unique private signed PUT path",()=>{
   const html=fs.readFileSync("public/index.html","utf8");
   const server=fs.readFileSync("server/index.js","utf8");
-  assert.match(html,/https:\/\/esm\.sh\/@vercel\/blob@2\.6\.1\/client/);
-  assert.match(html,/handleUploadUrl:"\/api\/blob\/client-upload"/);
-  assert.match(html,/access:"private"/);
-  assert.match(html,/multipart:true/);
-  assert.match(server,/\/api\/blob\/client-upload/);
-  assert.match(server,/handleUpload/);
+  assert.match(html,/\/api\/blob\/presign/);
+  assert.match(html,/method:"PUT"/);
+  assert.match(server,/crypto\.randomUUID\(\)/);
+  assert.match(server,/createPresignedPut/);
 });
 
 test("Vercel auto-production does not rely on fire-and-forget work",()=>{
@@ -57,14 +55,13 @@ test("Health exposes real Blob reachability and durable persistence state",()=>{
 });
 
 
-test('Large private video upload uses official Vercel client upload and server-side pathname verification', async()=>{
+test('Large private video upload uses a unique private signed PUT and server-side pathname consumption', async()=>{
   const s=fs.readFileSync('server/index.js','utf8');
   const h=fs.readFileSync('public/index.html','utf8');
-  assert.match(s,/handleUpload/);
-  assert.match(s,/\/api\/blob\/client-upload/);
+  assert.match(s,/createPresignedPut/);
   assert.match(s,/waitForPrivateBlob/);
-  assert.match(h,/handleUploadUrl:"\/api\/blob\/client-upload"/);
-  assert.match(h,/access:"private"/);
+  assert.match(h,/\/api\/blob\/presign/);
+  assert.match(h,/method:"PUT"/);
 });
 
 test('Blob not-found errors are normalized instead of leaking SDK exception', async()=>{
@@ -74,9 +71,8 @@ test('Blob not-found errors are normalized instead of leaking SDK exception', as
 });
 
 
-test('motion transfer has client-upload fallback to signed private PUT',()=>{
+test('motion transfer uses signed private PUT with unique server pathname',()=>{
   const h=fs.readFileSync('public/index.html','utf8');
-  assert.match(h,/https:\/\/esm\.sh\/@vercel\/blob@2\.6\.1\/client/);
   assert.match(h,/\/api\/blob\/presign/);
   assert.match(h,/method:"PUT"/);
   assert.match(h,/signed PUT/);
