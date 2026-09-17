@@ -95,3 +95,7 @@ The previous build incorrectly treated a Vercel OIDC-connected Blob store as unc
 
 ### Runway + Private Blob asset bridge
 Runway URL inputs require the asset host to support HTTP HEAD as well as GET. Vercel Blob presigned URLs are scoped to a single operation, so a presigned GET URL is not used directly as a Runway input. Motion Transfer now sends Blob pathnames to the server, downloads the private Blob object temporarily, uploads it to Runway's ephemeral upload API, and submits the resulting Runway URI. This keeps the Blob private while satisfying Runway's asset-fetch contract.
+
+
+## Runway asset bridge
+Motion Transfer Blob assets are exposed to Runway through a short-lived HTTPS bridge endpoint that supports both HEAD and GET, with exact Content-Type and Content-Length. This avoids relying on provider-side fetching of private Blob signed URLs or `runway://` URIs.

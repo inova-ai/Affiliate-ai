@@ -16,7 +16,7 @@
     "multer": "^1.4.5-lts.1",
     "ffmpeg-static": "^5.2.0",
     "ffprobe-static": "^3.1.0",
-    "@runwayml/sdk": "4.16.2"
+    "@runwayml/sdk": "4.20.0"
   },
   "description": "LUXMOTION AI v18.3.3 - Vercel-safe Express backend with Vercel Blob persistence and signed Runway inputs",
   "engines": {
