@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 
-test('motion upload path uses Vercel Blob and server-side Runway ephemeral upload instead of browser Runway upload-init', async()=>{
+test('motion upload path uses Vercel Blob and server-side HTTPS bridge instead of browser Runway upload-init', async()=>{
   const h=await fs.readFile('public/index.html','utf8');
   assert.match(h,/\/api\/blob\/presign/);
   assert.doesNotMatch(h,/\/api\/blob\/read-url/);
@@ -11,11 +11,13 @@ test('motion upload path uses Vercel Blob and server-side Runway ephemeral uploa
   assert.doesNotMatch(h,/\/api\/runway\/upload-init/);
 });
 
-test('server Blob bridge transfers private Blob paths to Runway ephemeral uploads', async()=>{
+test('server Blob bridge exposes private Blob paths with signed HTTPS URLs and HEAD support', async()=>{
   const s=await fs.readFile('server/index.js','utf8');
-  assert.match(s,/downloadPrivateToFile/);
-  assert.match(s,/uploadEphemeral\(normalizedImage/);
-  assert.match(s,/uploadEphemeral\(normalizedVideo/);
+  assert.match(s,/headPrivate/);
+  assert.match(s,/runwayBridgeUrl/);
+  assert.match(s,/api\/runway-asset/);
+  assert.match(s,/Content-Length/);
+  assert.match(s,/Content-Type/);
   assert.match(s,/sourceImageName/);
   assert.match(s,/motionReferenceName/);
 });
