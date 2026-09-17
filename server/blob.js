@@ -32,7 +32,7 @@ function requireBlob(){
 export async function createPresignedPut(pathname,contentType="application/octet-stream"){
   const b=requireBlob();
   if(!b.presignUrl || !b.issueSignedToken) throw new Error("Vercel Blob signed upload is unavailable. Update @vercel/blob and connect a Blob store.");
-  const token=await b.issueSignedToken({operations:["put"]});
+  const token=await b.issueSignedToken({pathname,operations:["put"]});
   const {presignedUrl}=await b.presignUrl(token,{pathname,operation:"put",validUntil:Date.now()+15*60*1000,contentType});
   return presignedUrl;
 }
@@ -40,7 +40,7 @@ export async function createPresignedPut(pathname,contentType="application/octet
 export async function createPresignedHead(pathname,validMs=15*60*1000){
   const b=requireBlob();
   if(!b.presignUrl || !b.issueSignedToken) throw new Error("Vercel Blob signed HEAD is unavailable.");
-  const token=await b.issueSignedToken({operations:["head"]});
+  const token=await b.issueSignedToken({pathname,operations:["head"]});
   const {presignedUrl}=await b.presignUrl(token,{pathname,operation:"head",validUntil:Date.now()+validMs});
   return presignedUrl;
 }
@@ -48,7 +48,7 @@ export async function createPresignedHead(pathname,validMs=15*60*1000){
 export async function createPresignedGet(pathname,validMs=24*60*60*1000){
   const b=requireBlob();
   if(!b.presignUrl || !b.issueSignedToken) throw new Error("Vercel Blob signed read is unavailable.");
-  const token=await b.issueSignedToken({operations:["get"]});
+  const token=await b.issueSignedToken({pathname,operations:["get"]});
   const {presignedUrl}=await b.presignUrl(token,{pathname,operation:"get",validUntil:Date.now()+validMs});
   return presignedUrl;
 }
@@ -88,7 +88,7 @@ export async function headPrivate(pathname){
   const b=requireBlob();
   if(!b.head) throw new Error("Vercel Blob head() is unavailable. Update @vercel/blob.");
   try{
-    return await b.head(clean);
+    return await b.head(clean,{useCache:false});
   }catch(e){
     // Vercel Blob throws when the object is genuinely missing. Normalize that
     // case so callers can return a useful 404/409 instead of leaking the SDK

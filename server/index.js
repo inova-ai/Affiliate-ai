@@ -80,6 +80,22 @@ app.post("/api/plan",(req,res)=>{
 app.post("/api/estimate",(req,res)=>{
  const b=req.body||{}; res.json({ok:true,estimate:estimate(b.mode||"balanced",b.duration||10)});
 });
+app.post("/api/blob/upload",upload.single("file"),async(req,res)=>{
+  try{
+    if(!blobConfigured()) return res.status(503).json({ok:false,error:"Vercel Blob is not configured."});
+    if(!req.file) return res.status(400).json({ok:false,error:"file is required"});
+    if(req.file.size>4*1024*1024) return res.status(413).json({ok:false,error:"Image upload must be 4 MB or smaller when using the server upload path."});
+    const original=String(req.file.originalname||"asset.bin").replace(/[^a-zA-Z0-9._-]/g,"_");
+    const pathname=`luxmotion/uploads/${crypto.randomUUID()}-${original}`;
+    const stored=await publishFile(req.file.path,pathname,req.file.mimetype||"application/octet-stream");
+    await fs.promises.unlink(req.file.path).catch(()=>{});
+    if(!stored?.pathname) return res.status(502).json({ok:false,error:"Blob upload returned no pathname."});
+    return res.json({ok:true,pathname:stored.pathname,url:stored.url||null,contentType:stored.contentType||req.file.mimetype,size:Number(stored.size||req.file.size||0),source:"server-put"});
+  }catch(e){
+    if(req.file?.path) await fs.promises.unlink(req.file.path).catch(()=>{});
+    return res.status(502).json({ok:false,error:"Blob server upload failed",detail:e.message});
+  }
+});
 app.post("/api/blob/presign",async(req,res)=>{
   try{
     if(!blobConfigured()) return res.status(503).json({ok:false,error:"Vercel Blob is not configured. Connect a Blob store to this project."});
