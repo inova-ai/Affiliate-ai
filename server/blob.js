@@ -33,7 +33,7 @@ export async function createPresignedPut(pathname,contentType="application/octet
   const b=requireBlob();
   if(!b.presignUrl || !b.issueSignedToken) throw new Error("Vercel Blob signed upload is unavailable. Update @vercel/blob and connect a Blob store.");
   const token=await b.issueSignedToken({pathname,operations:["put"]});
-  const {presignedUrl}=await b.presignUrl(token,{pathname,operation:"put",validUntil:Date.now()+15*60*1000,contentType});
+  const {presignedUrl}=await b.presignUrl(token,{pathname,operation:"put",access:"private",validUntil:Date.now()+15*60*1000,contentType});
   return presignedUrl;
 }
 
@@ -41,7 +41,7 @@ export async function createPresignedHead(pathname,validMs=15*60*1000){
   const b=requireBlob();
   if(!b.presignUrl || !b.issueSignedToken) throw new Error("Vercel Blob signed HEAD is unavailable.");
   const token=await b.issueSignedToken({pathname,operations:["head"]});
-  const {presignedUrl}=await b.presignUrl(token,{pathname,operation:"head",validUntil:Date.now()+validMs});
+  const {presignedUrl}=await b.presignUrl(token,{pathname,operation:"head",access:"private",validUntil:Date.now()+validMs});
   return presignedUrl;
 }
 
@@ -49,7 +49,7 @@ export async function createPresignedGet(pathname,validMs=24*60*60*1000){
   const b=requireBlob();
   if(!b.presignUrl || !b.issueSignedToken) throw new Error("Vercel Blob signed read is unavailable.");
   const token=await b.issueSignedToken({pathname,operations:["get"]});
-  const {presignedUrl}=await b.presignUrl(token,{pathname,operation:"get",validUntil:Date.now()+validMs});
+  const {presignedUrl}=await b.presignUrl(token,{pathname,operation:"get",access:"private",validUntil:Date.now()+validMs});
   return presignedUrl;
 }
 
