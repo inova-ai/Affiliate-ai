@@ -107,7 +107,8 @@ app.post("/api/blob/client-upload",async(req,res)=>{
       onBeforeGenerateToken:async(pathname,clientPayload,multipart)=>({
         allowedContentTypes:["video/mp4","video/webm","video/quicktime","video/x-matroska","video/3gpp","video/ogg","video/x-msvideo","video/mpeg"],
         maximumSizeInBytes:200*1024*1024,
-        addRandomSuffix:true,
+        addRandomSuffix:false,
+        allowOverwrite:true,
         tokenPayload:JSON.stringify({pathname,clientPayload:clientPayload||null,multipart:Boolean(multipart)})
       }),
       onUploadCompleted:async({blob})=>{
