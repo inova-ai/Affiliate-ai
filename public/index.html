@@ -113,14 +113,14 @@ async function uploadToRunwayDirect(file,status,label){
   if(!up.ok) throw new Error(`Upload ${label} ke Vercel Blob gagal (HTTP ${up.status}).`);
   status.textContent=`Memverifikasi ${label} di Vercel Blob…`;
   let verified=false,lastVerify="";
-  for(let attempt=0;attempt<5;attempt++){
+  for(let attempt=0;attempt<10;attempt++){
     const vr=await fetch("/api/blob/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pathname:ij.pathname})});
     const vj=await vr.json().catch(()=>({}));
     if(vr.ok&&vj.ok){verified=true;break;}
     lastVerify=vj.error||`HTTP ${vr.status}`;
-    await new Promise(resolve=>setTimeout(resolve,500));
+    await new Promise(resolve=>setTimeout(resolve,700));
   }
-  if(!verified) throw new Error(`${label} sudah diupload tetapi belum tersedia di Blob. ${lastVerify}`);
+  if(!verified) throw new Error(`${label} sudah diupload tetapi Blob tidak dapat diverifikasi. ${lastVerify}`);
   return {pathname:ij.pathname,blobUrl:ij.url,contentType:file.type||"application/octet-stream"};
 }
 
@@ -174,9 +174,15 @@ async function uploadAsset(){
    if(!pr.ok||!pj.ok) throw new Error(pj.detail||pj.error||"Vercel Blob belum terhubung");
    const put=await fetch(pj.url,{method:"PUT",headers:{"Content-Type":f.type},body:f});
    if(!put.ok) throw new Error(`Upload ke Blob gagal (HTTP ${put.status})`);
-   const verify=await fetch("/api/blob/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pathname:pj.pathname})});
-   const vj=await verify.json().catch(()=>({}));
-   if(!verify.ok||!vj.ok) throw new Error(vj.error||`Blob belum tersedia (HTTP ${verify.status})`);
+   let verified=false,lastVerify="";
+   for(let attempt=0;attempt<10;attempt++){
+     const verify=await fetch("/api/blob/verify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pathname:pj.pathname})});
+     const vj=await verify.json().catch(()=>({}));
+     if(verify.ok&&vj.ok){verified=true;break;}
+     lastVerify=vj.error||`HTTP ${verify.status}`;
+     await new Promise(resolve=>setTimeout(resolve,700));
+   }
+   if(!verified) throw new Error(`Blob belum dapat diverifikasi: ${lastVerify}`);
    const r=await fetch("/api/upload-from-url",{method:"POST",headers:runwayHeaders(),body:JSON.stringify({pathname:pj.pathname,originalName:f.name,mimeType:f.type,kind:"product",name:$("product").value||""})});
    const j=await r.json().catch(()=>({})); if(!r.ok||!j.ok) throw new Error(j.detail||j.error||"Gagal membuat reference profile");
    const item=j.files?.asset, uri=item?.runway?.uri||pj.url;
