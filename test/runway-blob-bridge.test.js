@@ -11,15 +11,15 @@ test('motion upload path uses Vercel Blob and server-side HTTPS bridge instead o
   assert.doesNotMatch(h,/\/api\/runway\/upload-init/);
 });
 
-test('server Blob bridge exposes private Blob paths with signed HTTPS URLs and HEAD support', async()=>{
+test('server Blob motion transfer uses Runway ephemeral uploads with explicit filenames', async()=>{
   const s=await fs.readFile('server/index.js','utf8');
   assert.match(s,/headPrivate/);
-  assert.match(s,/runwayBridgeUrl/);
-  assert.match(s,/api\/runway-asset/);
-  assert.match(s,/Content-Length/);
-  assert.match(s,/Content-Type/);
-  assert.match(s,/sourceImageName/);
-  assert.match(s,/motionReferenceName/);
+  assert.match(s,/uploadEphemeral/);
+  assert.match(s,/runway-ephemeral/);
+  assert.match(s,/toFile/);
+  assert.match(s,/downloadPrivateToFile/);
+  assert.match(s,/source-image/);
+  assert.match(s,/motion-reference/);
 });
 
 test('durable media publish returns Blob metadata used for pathname persistence', async()=>{
