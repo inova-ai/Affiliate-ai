@@ -10,7 +10,7 @@ import {fileURLToPath} from "url";
 import {execFile} from "child_process";
 import {promisify} from "util";
 import {ffmpegPath, ffprobePath, mediaToolInfo} from "./media-tools.js";
-import {blobConfigured, blobAuthInfo, createPresignedPut, createPresignedGet, publishFile, signedUrl} from "./blob.js";
+import {blobConfigured, blobAuthInfo, createPresignedPut, createPresignedGet, publishFile, signedUrl, headPrivate, readPrivate} from "./blob.js";
 import {buildStoryboard} from "./storyboard.js";
 import {routeModel,estimate,runwayRender,runwayMotionTransfer,runwayMotionCreate,runwayMotionStatus,uploadEphemeral} from "./providers.js";
 import {renderProject,makeConcatList} from "./pipeline.js";
@@ -29,6 +29,26 @@ const app=express(), PORT=process.env.PORT||8787;
 
 function requestRunwayKey(req){ return String(req.headers["x-luxmotion-runway-key"]||req.body?.runwayApiKey||process.env.RUNWAYML_API_SECRET||process.env.RUNWAY_API_KEY||"").trim(); }
 function keySource(req){ return requestRunwayKey(req) ? (req.headers["x-luxmotion-runway-key"]||req.body?.runwayApiKey ? "browser" : "environment") : "none"; }
+function runwayBridgeSecret(){
+  return String(process.env.RUNWAY_ASSET_BRIDGE_SECRET||process.env.RUNWAYML_API_SECRET||process.env.RUNWAY_API_KEY||"").trim();
+}
+function runwayBridgeSignature(pathname,expires){
+  return crypto.createHmac("sha256",runwayBridgeSecret()).update(`${pathname}\n${expires}`).digest("hex");
+}
+function runwayBridgeUrl(req,pathname,ttlMs=15*60*1000){
+  const expires=Date.now()+ttlMs;
+  const sig=runwayBridgeSignature(pathname,expires);
+  const proto=String(req.headers["x-forwarded-proto"]||"https").split(",")[0].trim();
+  return `${proto}://${req.headers.host}/api/runway-asset?pathname=${encodeURIComponent(pathname)}&expires=${expires}&sig=${sig}`;
+}
+function validRunwayBridge(pathname,expires,sig){
+  if(!pathname||!sig||!runwayBridgeSecret()) return false;
+  const exp=Number(expires); if(!Number.isFinite(exp)||exp<Date.now()) return false;
+  const expected=runwayBridgeSignature(pathname,exp);
+  const a=Buffer.from(expected), b=Buffer.from(String(sig));
+  return a.length===b.length && crypto.timingSafeEqual(a,b);
+}
+
 
 async function profilePrimaryUrl(profile){
   const pathname=profile?.normalizedBlobPath||profile?.originalBlobPath||null;
@@ -216,6 +236,27 @@ app.post('/api/runway/test',async(req,res)=>{
  }catch(e){return res.status(502).json({ok:false,status:'network_error',error:'Tidak bisa menghubungi Runway API.',detail:e.message});}
 });
 
+app.all("/api/runway-asset",async(req,res)=>{
+  const pathname=String(req.query?.pathname||"");
+  const expires=String(req.query?.expires||"");
+  const sig=String(req.query?.sig||"");
+  if(!validRunwayBridge(pathname,expires,sig)) return res.status(403).send("Forbidden");
+  try{
+    if(req.method==="HEAD") {
+      const meta=await headPrivate(pathname);
+      if(!meta) return res.status(404).end();
+      res.status(200).set({"Content-Type":meta.contentType||"application/octet-stream","Content-Length":String(meta.size),"Cache-Control":"no-store"});
+      return res.end();
+    }
+    if(req.method!=="GET") return res.status(405).set("Allow","GET, HEAD").end();
+    const result=await readPrivate(pathname);
+    if(!result || result.statusCode!==200) return res.status(404).end();
+    res.status(200).set({"Content-Type":result.blob?.contentType||"application/octet-stream","Cache-Control":"no-store"});
+    if(result.blob?.size!=null) res.setHeader("Content-Length",String(result.blob.size));
+    return result.stream.pipeTo(new WritableStream({write(chunk){res.write(Buffer.from(chunk));},close(){res.end();},abort(err){res.destroy(err);}})).catch(err=>{try{res.destroy(err);}catch{}});
+  }catch(e){ return res.status(404).send("Not found"); }
+});
+
 app.post("/api/motion-transfer/runway",async(req,res)=>{
  const b=req.body||{};
  const sourcePath=String(b.sourceImagePath||"").trim();
@@ -227,32 +268,21 @@ app.post("/api/motion-transfer/runway",async(req,res)=>{
    const bridgeMeta={};
    if(sourcePath || referencePath){
      if(!blobConfigured()) return res.status(503).json({ok:false,error:"Vercel Blob is required for Blob-backed Runway assets."});
-     const {downloadPrivateToFile}=await import("./blob.js");
      if(sourcePath){
        const sourceName=safeAssetName(b.sourceImageName,path.extname(sourcePath)||"source-image.jpg");
-       const rawImage=path.join(uploadDir,`runway-${crypto.randomUUID()}-image${path.extname(sourceName)||".bin"}`);
-       const normalizedImage=path.join(uploadDir,`runway-${crypto.randomUUID()}-image.jpg`);
-       await downloadPrivateToFile(sourcePath,rawImage);
-       await normalizeRunwayImage(rawImage,normalizedImage);
-       const up=await uploadEphemeral(normalizedImage,"source-image.jpg",requestRunwayKey(req));
-       if(!up.ok) return res.status(502).json({ok:false,error:"Source image transfer to Runway failed",detail:up});
-       promptImage=up.uri;
-       bridgeMeta.sourceImage={name:sourceName,bytes:fs.statSync(normalizedImage).size,uriType:"runway"};
-       await Promise.all([fs.promises.unlink(rawImage).catch(()=>{}),fs.promises.unlink(normalizedImage).catch(()=>{})]);
+       const meta=await headPrivate(sourcePath);
+       const contentType=String(meta?.contentType||"");
+       if(!/^image\/(jpeg|png|webp)$/.test(contentType)) return res.status(400).json({ok:false,error:"Source image Blob has unsupported Content-Type",detail:{contentType}});
+       promptImage=runwayBridgeUrl(req,sourcePath);
+       bridgeMeta.sourceImage={name:sourceName,bytes:Number(meta?.size||0),contentType,uriType:"https-bridge",headSupported:true};
      }
      if(referencePath){
        const referenceName=safeAssetName(b.motionReferenceName,path.extname(referencePath)||"motion-reference.mp4");
-       const rawVideo=path.join(uploadDir,`runway-${crypto.randomUUID()}-motion${path.extname(referenceName)||".bin"}`);
-       const normalizedVideo=path.join(uploadDir,`runway-${crypto.randomUUID()}-motion.mp4`);
-       await downloadPrivateToFile(referencePath,rawVideo);
-       const motionMeta=await validateMotionReference(rawVideo);
-       await normalizeRunwayVideo(rawVideo,normalizedVideo);
-       const normalizedMeta=await validateMotionReference(normalizedVideo);
-       const up=await uploadEphemeral(normalizedVideo,"motion-reference.mp4",requestRunwayKey(req));
-       if(!up.ok) return res.status(502).json({ok:false,error:"Motion reference transfer to Runway failed",detail:up});
-       referenceVideo=up.uri;
-       bridgeMeta.motionReference={name:referenceName,sourceMeta:motionMeta,normalizedMeta,bytes:fs.statSync(normalizedVideo).size,uriType:"runway"};
-       await Promise.all([fs.promises.unlink(rawVideo).catch(()=>{}),fs.promises.unlink(normalizedVideo).catch(()=>{})]);
+       const meta=await headPrivate(referencePath);
+       const contentType=String(meta?.contentType||"");
+       if(!/^video\/(mp4|quicktime|webm|x-matroska|3gpp|ogg|x-msvideo|mpeg)$/.test(contentType)) return res.status(400).json({ok:false,error:"Motion reference Blob has unsupported Content-Type",detail:{contentType}});
+       referenceVideo=runwayBridgeUrl(req,referencePath);
+       bridgeMeta.motionReference={name:referenceName,bytes:Number(meta?.size||0),contentType,uriType:"https-bridge",headSupported:true};
      }
    }
    const result=await runwayMotionCreate({promptImage,referenceVideo,promptText:String(b.prompt||"").slice(0,15000),duration:Number(b.duration||5),format:b.format||"9:16",audio:Boolean(b.audio),apiKey:requestRunwayKey(req)});

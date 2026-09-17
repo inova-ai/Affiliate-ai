@@ -74,6 +74,12 @@ export async function putPrivateFile(filePath,pathname,contentType="application/
   return putPrivate(pathname,await fs.readFile(filePath),contentType,true);
 }
 
+export async function headPrivate(pathname){
+  const b=requireBlob();
+  if(!b.head) throw new Error("Vercel Blob head() is unavailable. Update @vercel/blob.");
+  return await b.head(pathname);
+}
+
 export async function readPrivate(pathname){
   const b=requireBlob();
   const result=await b.get(pathname,{access:"private",useCache:false});
