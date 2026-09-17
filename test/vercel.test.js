@@ -72,3 +72,12 @@ test('Blob not-found errors are normalized instead of leaking SDK exception', as
   assert.match(b,/does not exist\|not found\|404/);
   assert.match(b,/waitForPrivateBlob/);
 });
+
+
+test('motion transfer has client-upload fallback to signed private PUT',()=>{
+  const h=fs.readFileSync('public/index.html','utf8');
+  assert.match(h,/https:\/\/esm\.sh\/@vercel\/blob@2\.6\.1\/client/);
+  assert.match(h,/\/api\/blob\/presign/);
+  assert.match(h,/method:"PUT"/);
+  assert.match(h,/signed PUT/);
+});
