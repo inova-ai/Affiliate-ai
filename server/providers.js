@@ -46,10 +46,14 @@ export async function uploadEphemeral(filePath,originalName,apiKey){
   try{
     const data=await fs.promises.readFile(filePath);
     const filename=String(originalName||"asset.bin").replace(/[^a-zA-Z0-9._-]/g,"_");
-    const response=await client(apiKey).uploads.createEphemeral(fs.createReadStream(filePath));
+    // Use the SDK's toFile helper with an explicit representative filename.
+    // This prevents a temporary UUID path (without .jpg/.mp4) from being
+    // uploaded as an ambiguous application/octet-stream asset.
+    const file=toFile(data, filename);
+    const response=await client(apiKey).uploads.createEphemeral(file);
     const uri=String(response?.uri||"").trim();
     if(!uri.startsWith("runway://")) return {ok:false,code:"RUNWAY_UPLOAD_URI_INVALID",detail:`Runway upload returned an invalid URI: ${uri.slice(0,120)}`};
-    return {ok:true,uri,expiresInHours:24,originalName,uploadMode:"fs-stream"};
+    return {ok:true,uri,expiresInHours:24,originalName:filename,uploadMode:"sdk-toFile",bytes:size};
   }catch(error){
     return {ok:false,code:"RUNWAY_UPLOAD_FAILED",detail:error.message};
   }
