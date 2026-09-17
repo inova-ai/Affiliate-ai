@@ -12,7 +12,7 @@ import {promisify} from "util";
 import {ffmpegPath, ffprobePath, mediaToolInfo} from "./media-tools.js";
 import {blobConfigured, blobAuthInfo, createPresignedPut, createPresignedGet, publishFile, signedUrl} from "./blob.js";
 import {buildStoryboard} from "./storyboard.js";
-import {routeModel,estimate,runwayRender,runwayMotionTransfer,uploadEphemeral} from "./providers.js";
+import {routeModel,estimate,runwayRender,runwayMotionTransfer,runwayMotionCreate,runwayMotionStatus,uploadEphemeral} from "./providers.js";
 import {renderProject,makeConcatList} from "./pipeline.js";
 import {mediaQC,lockedPrompt,retryDecision} from "./qc.js";
 import {visualQC,visualRetryDecision} from "./visual-qc.js";
@@ -221,30 +221,23 @@ app.post("/api/motion-transfer/runway",async(req,res)=>{
  const sourcePath=String(b.sourceImagePath||"").trim();
  const referencePath=String(b.motionReferencePath||"").trim();
  if((!sourcePath && !b.sourceImageUri)||(!referencePath && !b.motionReferenceUri)) return res.status(400).json({ok:false,error:"sourceImagePath/sourceImageUri and motionReferencePath/motionReferenceUri are required"});
- let tmpImage=null,tmpVideo=null;
  try{
    let promptImage=String(b.sourceImageUri||"").trim();
    let referenceVideo=String(b.motionReferenceUri||"").trim();
-   // Runway requires external asset URLs to answer both HEAD and GET. A Vercel
-   // Blob presigned GET URL is scoped to GET only, so Runway's mandatory HEAD
-   // probe can reject it. For Blob path inputs, bridge the private object through
-   // Runway's own ephemeral upload API instead. This keeps the Blob private and
-   // avoids exposing storage credentials.
-   let bridgeMeta={};
+   const bridgeMeta={};
    if(sourcePath || referencePath){
      if(!blobConfigured()) return res.status(503).json({ok:false,error:"Vercel Blob is required for Blob-backed Runway assets."});
      const {downloadPrivateToFile}=await import("./blob.js");
      if(sourcePath){
        const sourceName=safeAssetName(b.sourceImageName,path.extname(sourcePath)||"source-image.jpg");
-       const sourceExt=path.extname(sourceName).toLowerCase();
-       const rawImage=path.join(uploadDir,`runway-${crypto.randomUUID()}-image${sourceExt||".bin"}`);
+       const rawImage=path.join(uploadDir,`runway-${crypto.randomUUID()}-image${path.extname(sourceName)||".bin"}`);
        const normalizedImage=path.join(uploadDir,`runway-${crypto.randomUUID()}-image.jpg`);
        await downloadPrivateToFile(sourcePath,rawImage);
        await normalizeRunwayImage(rawImage,normalizedImage);
        const up=await uploadEphemeral(normalizedImage,"source-image.jpg",requestRunwayKey(req));
        if(!up.ok) return res.status(502).json({ok:false,error:"Source image transfer to Runway failed",detail:up});
        promptImage=up.uri;
-       bridgeMeta.sourceImage={name:sourceName,bytes:fs.statSync(normalizedImage).size,uriType:String(up.uri||"").split(":")[0]};
+       bridgeMeta.sourceImage={name:sourceName,bytes:fs.statSync(normalizedImage).size,uriType:"runway"};
        await Promise.all([fs.promises.unlink(rawImage).catch(()=>{}),fs.promises.unlink(normalizedImage).catch(()=>{})]);
      }
      if(referencePath){
@@ -258,24 +251,32 @@ app.post("/api/motion-transfer/runway",async(req,res)=>{
        const up=await uploadEphemeral(normalizedVideo,"motion-reference.mp4",requestRunwayKey(req));
        if(!up.ok) return res.status(502).json({ok:false,error:"Motion reference transfer to Runway failed",detail:up});
        referenceVideo=up.uri;
-       bridgeMeta.motionReference={name:referenceName,sourceMeta:motionMeta,normalizedMeta,bytes:fs.statSync(normalizedVideo).size,uriType:String(up.uri||"").split(":")[0]};
+       bridgeMeta.motionReference={name:referenceName,sourceMeta:motionMeta,normalizedMeta,bytes:fs.statSync(normalizedVideo).size,uriType:"runway"};
        await Promise.all([fs.promises.unlink(rawVideo).catch(()=>{}),fs.promises.unlink(normalizedVideo).catch(()=>{})]);
      }
    }
-   const result=await runwayMotionTransfer({promptImage,referenceVideo,promptText:String(b.prompt||"").slice(0,15000),duration:Number(b.duration||5),format:b.format||"9:16",audio:Boolean(b.audio),apiKey:requestRunwayKey(req)});
-   if(result.ok && Array.isArray(result.output) && result.output[0] && blobConfigured()){
+   const result=await runwayMotionCreate({promptImage,referenceVideo,promptText:String(b.prompt||"").slice(0,15000),duration:Number(b.duration||5),format:b.format||"9:16",audio:Boolean(b.audio),apiKey:requestRunwayKey(req)});
+   if(!result.ok) return res.status(502).json({...result,bridgeMeta});
+   res.status(202).json({...result,bridgeMeta,message:"Runway task submitted. Poll /api/motion-transfer/runway/status/:taskId."});
+ }catch(e){res.status(502).json({ok:false,error:"Motion transfer preparation failed",detail:e.message});}
+});
+
+app.get("/api/motion-transfer/runway/status/:taskId",async(req,res)=>{
+ try{
+   const result=await runwayMotionStatus(req.params.taskId,requestRunwayKey(req));
+   if(!result.ok && result.status!=="failed") return res.status(502).json(result);
+   if(result.status==="failed" || result.status==="canceled") return res.status(200).json(result);
+   if(result.status!=="completed") return res.status(200).json(result);
+   if(result.output?.[0] && blobConfigured()){
+     const local=path.join(renderDir,`motion-${crypto.randomUUID()}.mp4`);
      try{
-       const local=path.join(renderDir,`motion-${crypto.randomUUID()}.mp4`);
        await downloadToFile(result.output[0],local);
        const durable=await publishFile(local,`luxmotion/motion/${path.basename(local)}`,"video/mp4");
-       if(durable) result.durableOutput=durable;
-     }catch(e){ result.persistenceWarning=`Motion result could not be copied to Blob: ${e.message}`; }
+       if(durable){ result.durableOutput=await signedUrl(durable.pathname).catch(()=>null); result.durableBlobPath=durable.pathname; }
+     } finally { await fs.promises.unlink(local).catch(()=>{}); }
    }
-   res.status(result.ok?200:502).json({...result,bridgeMeta});
- }catch(e){res.status(502).json({ok:false,error:"Motion transfer failed",detail:e.message});}
- finally{
-   for(const f of [tmpImage,tmpVideo]) if(f){try{await fs.promises.unlink(f)}catch{}}
- }
+   return res.json(result);
+ }catch(e){return res.status(502).json({ok:false,error:"Motion status failed",detail:e.message});}
 });
 
 app.post("/api/motion-transfer",motionUpload.fields([

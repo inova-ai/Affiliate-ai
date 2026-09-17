@@ -46,8 +46,10 @@ export async function uploadEphemeral(filePath,originalName,apiKey){
   try{
     const data=await fs.promises.readFile(filePath);
     const filename=String(originalName||"asset.bin").replace(/[^a-zA-Z0-9._-]/g,"_");
-    const response=await client(apiKey).uploads.createEphemeral(runwayFile(data,filename));
-    return {ok:true,uri:response.uri,expiresInHours:24,originalName};
+    const response=await client(apiKey).uploads.createEphemeral(fs.createReadStream(filePath));
+    const uri=String(response?.uri||"").trim();
+    if(!uri.startsWith("runway://")) return {ok:false,code:"RUNWAY_UPLOAD_URI_INVALID",detail:`Runway upload returned an invalid URI: ${uri.slice(0,120)}`};
+    return {ok:true,uri,expiresInHours:24,originalName,uploadMode:"fs-stream"};
   }catch(error){
     return {ok:false,code:"RUNWAY_UPLOAD_FAILED",detail:error.message};
   }
@@ -57,7 +59,9 @@ export async function uploadBufferEphemeral(buffer,filename="asset.bin",apiKey){
   if(!key(apiKey)) return {ok:false,code:"RUNWAY_API_KEY_MISSING"};
   try{
     const response=await client(apiKey).uploads.createEphemeral(runwayFile(buffer,filename));
-    return {ok:true,uri:response.uri,expiresInHours:24,originalName:filename};
+    const uri=String(response?.uri||"").trim();
+    if(!uri.startsWith("runway://")) return {ok:false,code:"RUNWAY_UPLOAD_URI_INVALID",detail:`Runway upload returned an invalid URI: ${uri.slice(0,120)}`};
+    return {ok:true,uri,expiresInHours:24,originalName:filename,uploadMode:"buffer-file"};
   }catch(error){return {ok:false,code:"RUNWAY_UPLOAD_FAILED",detail:error.message};}
 }
 
@@ -71,16 +75,47 @@ export async function runwayRender({promptImage,promptText,duration=5,model="gen
     return {ok:false,status:"failed",code:"RUNWAY_REQUEST_FAILED",detail:error.message};
   }
 }
-export async function runwayMotionTransfer({promptImage,referenceVideo,promptText="",duration=5,format="9:16",audio=false,apiKey}){
+function motionPayload({promptImage,referenceVideo,promptText="",duration=5,format="9:16",audio=false}){
+  const d=Math.max(4,Math.min(30,Number(duration)||5));
+  const ratio={"9:16":"1080:1920","1:1":"1440:1440","4:5":"1248:1664","16:9":"1920:1080"}[format]||"1080:1920";
+  return {model:"seedance2_5",promptVideo:referenceVideo,mode:"reference",promptText:promptText||"Use the reference video for motion, camera movement, timing, and physical dynamics. Recreate the scene using the supplied reference image as the primary subject. Preserve the subject identity, appearance, proportions, clothing/product details, and visual character. Do not introduce unrelated subjects or objects.",ratio,duration:d,audio:Boolean(audio),references:[{uri:promptImage}]};
+}
+
+export async function runwayMotionCreate({promptImage,referenceVideo,promptText="",duration=5,format="9:16",audio=false,apiKey}){
   if(!key(apiKey)) return {ok:false,code:"RUNWAY_API_KEY_MISSING",message:"Set RUNWAYML_API_SECRET in .env."};
   if(!promptImage) return {ok:false,code:"SOURCE_IMAGE_MISSING",message:"Source image is required."};
   if(!referenceVideo) return {ok:false,code:"REFERENCE_VIDEO_MISSING",message:"Motion reference video is required."};
-  const d=Math.max(4,Math.min(30,Number(duration)||5));
-  const ratio={"9:16":"1080:1920","1:1":"1440:1440","4:5":"1248:1664","16:9":"1920:1080"}[format]||"1080:1920";
   try{
-    const task=await client(apiKey).videoToVideo.create({model:"seedance2_5",promptVideo:referenceVideo,mode:"reference",promptText:promptText||"Use the reference video for motion, camera movement, timing, and physical dynamics. Recreate the scene using the supplied reference image as the primary subject. Preserve the subject identity, appearance, proportions, clothing/product details, and visual character. Do not introduce unrelated subjects or objects.",ratio,duration:d,audio:Boolean(audio),references:[{uri:promptImage}]}).waitForTaskOutput();
-    return {ok:true,status:"completed",taskId:task.id||null,output:task.output||[],raw:task};
-  }catch(error){ if(error instanceof TaskFailedError) return {ok:false,status:"failed",code:"RUNWAY_MOTION_TASK_FAILED",detail:error.taskDetails}; return {ok:false,status:"failed",code:"RUNWAY_MOTION_REQUEST_FAILED",detail:error.message}; }
+    const task=await client(apiKey).videoToVideo.create(motionPayload({promptImage,referenceVideo,promptText,duration,format,audio}));
+    return {ok:true,status:"submitted",taskId:task.id||null,raw:task};
+  }catch(error){
+    if(error instanceof TaskFailedError) return {ok:false,status:"failed",code:"RUNWAY_MOTION_TASK_FAILED",detail:error.taskDetails};
+    return {ok:false,status:"failed",code:"RUNWAY_MOTION_REQUEST_FAILED",detail:error.message};
+  }
+}
+
+export async function runwayMotionStatus(taskId,apiKey){
+  if(!key(apiKey)) return {ok:false,code:"RUNWAY_API_KEY_MISSING"};
+  if(!taskId) return {ok:false,code:"RUNWAY_TASK_ID_MISSING"};
+  try{
+    const task=await client(apiKey).tasks.retrieve(String(taskId));
+    const status=String(task?.status||"").toUpperCase();
+    if(status==="SUCCEEDED") return {ok:true,status:"completed",taskId:task.id||taskId,output:task.output||[],raw:task};
+    if(status==="FAILED"||status==="CANCELED") return {ok:false,status:status.toLowerCase(),taskId:task.id||taskId,code:"RUNWAY_MOTION_TASK_FAILED",detail:task};
+    return {ok:true,status:status.toLowerCase()||"pending",taskId:task.id||taskId,raw:task};
+  }catch(error){ return {ok:false,status:"error",code:"RUNWAY_MOTION_STATUS_FAILED",detail:error.message}; }
+}
+
+export async function runwayMotionTransfer(args){
+  const created=await runwayMotionCreate(args);
+  if(!created.ok) return created;
+  try{
+    const task=await client(args.apiKey).tasks.retrieve(created.taskId).waitForTaskOutput({timeout:280000});
+    return {ok:true,status:"completed",taskId:task.id||created.taskId,output:task.output||[],raw:task};
+  }catch(error){
+    if(error instanceof TaskFailedError) return {ok:false,status:"failed",code:"RUNWAY_MOTION_TASK_FAILED",detail:error.taskDetails,taskId:created.taskId};
+    return {ok:false,status:"failed",code:"RUNWAY_MOTION_REQUEST_FAILED",detail:error.message,taskId:created.taskId};
+  }
 }
 
 export async function runwayMultiShot({shots,duration=10,firstFrame,format="9:16",audio=true,apiKey}){
