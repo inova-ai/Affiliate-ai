@@ -99,3 +99,9 @@ Runway URL inputs require the asset host to support HTTP HEAD as well as GET. Ve
 
 ## Runway asset bridge
 Motion Transfer Blob assets are exposed to Runway through a short-lived HTTPS bridge endpoint that supports both HEAD and GET, with exact Content-Type and Content-Length. This avoids relying on provider-side fetching of private Blob signed URLs or `runway://` URIs.
+
+## Vercel Blob missing-object hardening
+- Browser Blob uploads are verified by exact pathname before Motion Transfer/Profile creation proceeds.
+- Server-side Blob reads normalize missing-object errors instead of leaking the SDK exception.
+- Motion Transfer waits briefly for Blob read-after-write visibility and returns a clear 404 if the exact pathname is unavailable.
+- This build keeps the existing private Blob + signed URL architecture.
