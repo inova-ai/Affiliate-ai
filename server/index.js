@@ -11,6 +11,7 @@ import {execFile} from "child_process";
 import {promisify} from "util";
 import {ffmpegPath, ffprobePath, mediaToolInfo} from "./media-tools.js";
 import {blobConfigured, blobAuthInfo, createPresignedPut, createPresignedGet, publishFile, signedUrl, headPrivate, waitForPrivateBlob, readPrivate, downloadPrivateToFile} from "./blob.js";
+import {handleUpload} from "@vercel/blob/client";
 import {buildStoryboard} from "./storyboard.js";
 import {routeModel,estimate,runwayRender,runwayMotionTransfer,runwayMotionCreate,runwayMotionStatus,uploadEphemeral} from "./providers.js";
 import {renderProject,makeConcatList} from "./pipeline.js";
@@ -96,6 +97,31 @@ app.post("/api/blob/upload",upload.single("file"),async(req,res)=>{
     return res.status(502).json({ok:false,error:"Blob server upload failed",detail:e.message});
   }
 });
+app.post("/api/blob/client-upload",async(req,res)=>{
+  try{
+    if(!blobConfigured()) return res.status(503).json({ok:false,error:"Vercel Blob is not configured."});
+    const body=req.body||{};
+    const jsonResponse=await handleUpload({
+      body,
+      request:req,
+      onBeforeGenerateToken:async(pathname,clientPayload,multipart)=>({
+        allowedContentTypes:["video/mp4","video/webm","video/quicktime","video/x-matroska","video/3gpp","video/ogg","video/x-msvideo","video/mpeg"],
+        maximumSizeInBytes:200*1024*1024,
+        addRandomSuffix:false,
+        tokenPayload:JSON.stringify({pathname,clientPayload:clientPayload||null,multipart:Boolean(multipart)})
+      }),
+      onUploadCompleted:async({blob})=>{
+        // The client SDK resolves only after Blob confirms the upload.
+        // No custom presigned PUT/HEAD race is required.
+        console.log("LUXMOTION private Blob client upload completed",blob?.pathname||"");
+      }
+    });
+    return res.json(jsonResponse);
+  }catch(e){
+    return res.status(400).json({ok:false,error:"Blob client upload negotiation failed",detail:e.message});
+  }
+});
+
 app.post("/api/blob/presign",async(req,res)=>{
   try{
     if(!blobConfigured()) return res.status(503).json({ok:false,error:"Vercel Blob is not configured. Connect a Blob store to this project."});
