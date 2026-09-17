@@ -105,3 +105,7 @@ Motion Transfer Blob assets are exposed to Runway through a short-lived HTTPS br
 - Server-side Blob reads normalize missing-object errors instead of leaking the SDK exception.
 - Motion Transfer waits briefly for Blob read-after-write visibility and returns a clear 404 if the exact pathname is unavailable.
 - This build keeps the existing private Blob + signed URL architecture.
+
+## Private Blob large-video upload fix (V6)
+
+Motion Transfer large video uploads now use Vercel Blob's official client-upload token exchange with `access: "private"` and multipart upload. This replaces the custom browser presigned PUT/HEAD verification path that could report a successful upload while the follow-up verification could not see the object. The server exposes `/api/blob/client-upload` via `handleUpload`, while the browser uses `@vercel/blob/client`. The downstream Motion Transfer endpoint still verifies the exact pathname server-side before downloading the private blob and sending it to Runway's ephemeral upload.
