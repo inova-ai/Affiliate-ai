@@ -15,14 +15,6 @@ test("Vercel Express entrypoint and function contract are present",()=>{
   for(const dep of ["@vercel/blob","ffmpeg-static","ffprobe-static","@runwayml/sdk"]) assert.ok(pkg.dependencies[dep],`${dep} dependency missing`);
 });
 
-test("large private browser uploads use unique private signed PUT path",()=>{
-  const html=fs.readFileSync("public/index.html","utf8");
-  const server=fs.readFileSync("server/index.js","utf8");
-  assert.match(html,/\/api\/blob\/presign/);
-  assert.match(html,/method:"PUT"/);
-  assert.match(server,/crypto\.randomUUID\(\)/);
-  assert.match(server,/createPresignedPut/);
-});
 
 test("Vercel auto-production does not rely on fire-and-forget work",()=>{
   const server=fs.readFileSync("server/index.js","utf8");
@@ -55,14 +47,6 @@ test("Health exposes real Blob reachability and durable persistence state",()=>{
 });
 
 
-test('Large private video upload uses a unique private signed PUT and server-side pathname consumption', async()=>{
-  const s=fs.readFileSync('server/index.js','utf8');
-  const h=fs.readFileSync('public/index.html','utf8');
-  assert.match(s,/createPresignedPut/);
-  assert.match(s,/waitForPrivateBlob/);
-  assert.match(h,/\/api\/blob\/presign/);
-  assert.match(h,/method:"PUT"/);
-});
 
 test('Blob not-found errors are normalized instead of leaking SDK exception', async()=>{
   const b=fs.readFileSync('server/blob.js','utf8');
@@ -71,9 +55,10 @@ test('Blob not-found errors are normalized instead of leaking SDK exception', as
 });
 
 
-test('motion transfer uses signed private PUT with unique server pathname',()=>{
+test('motion transfer uses the Runway ephemeral upload API',()=>{
   const h=fs.readFileSync('public/index.html','utf8');
-  assert.match(h,/\/api\/blob\/presign/);
-  assert.match(h,/method:"PUT"/);
-  assert.match(h,/signed PUT/);
+  const p=fs.readFileSync('server/providers.js','utf8');
+  assert.match(h,/\/api\/runway\/upload-init/);
+  assert.match(h,/uploadUrl/);
+  assert.match(p,/https:\/\/api\.dev\.runwayml\.com\/v1\/uploads/);
 });
