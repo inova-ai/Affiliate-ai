@@ -15,3 +15,14 @@ test('motion transfer catch renders normalized text instead of Error.message obj
   assert.ok(html.includes('catch(e){const msg=explainError(e);status.textContent="Error: "+msg;$("job").textContent=msg}'));
   assert.doesNotMatch(html,/catch\(e\)\{\$\("job"\)\.textContent=e\.message\}/);
 });
+
+
+test('server Runway provider defines errorDetail before using it',()=>{
+  const providers=fs.readFileSync('server/providers.js','utf8');
+  assert.match(providers,/function errorDetail\(error\)/);
+  assert.doesNotMatch(providers,/errorDetail\(error\).*ReferenceError/s);
+});
+
+test('render job never coerces an object with String()',()=>{
+  assert.match(html,/JSON\.stringify\(j\.job\?\?j,null,2\)/);
+});
