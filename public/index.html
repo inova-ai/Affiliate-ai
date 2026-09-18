@@ -144,6 +144,19 @@ async function uploadToRunwayDirect(file,status,label){
   return {pathname:ij.pathname,blobUrl:null,contentType:file.type||"application/octet-stream",fallback:false};
 }
 
+function explainError(value){
+  if(value==null)return "Unknown error";
+  if(typeof value==="string")return value;
+  if(value instanceof Error)return value.message||String(value);
+  if(typeof value==="object"){
+    for(const k of ["message","error","detail","reason","failure","code"]){
+      if(value[k]!=null){ const x=explainError(value[k]); if(x && x!=="Unknown error") return x; }
+    }
+    try{return JSON.stringify(value,null,2)}catch{return String(value)}
+  }
+  return String(value);
+}
+
 async function motionTransfer(){
  const image=$("motionImage").files[0], video=$("motionVideo").files[0]; const status=$("motionStatus"), btn=$("motionBtn"), out=$("motionResult");
  if(!image||!video){status.textContent="Pilih 1 foto dan 1 video referensi.";return}
@@ -155,7 +168,7 @@ async function motionTransfer(){
    const imageAsset=await uploadToRunwayDirect(image,status,"foto"); const videoAsset=await uploadToRunwayDirect(video,status,"video referensi");
    status.textContent="Memindahkan asset Blob ke upload ephemeral Runway…";
    const r=await fetch("/api/motion-transfer/runway",{method:"POST",headers:runwayHeaders(),body:JSON.stringify({sourceImagePath:imageAsset.pathname,sourceImageName:image.name,motionReferencePath:videoAsset.pathname,motionReferenceName:video.name,prompt:$("motionPrompt").value,duration:Number($("motionDuration").value),format:$("motionFormat").value,audio:$("motionAudio").checked})});
-   const j=await r.json().catch(()=>({})); if(!r.ok||!j.ok) throw new Error(j.detail||j.error||"Motion transfer gagal");
+   const j=await r.json().catch(()=>({})); if(!r.ok||!j.ok) throw new Error(explainError(j.detail||j.error||j||"Motion transfer gagal"));
    $("job").textContent=JSON.stringify(j,null,2);
    if(!j.taskId) throw new Error("Runway tidak mengembalikan taskId.");
    status.textContent="Runway sedang memproses Motion Transfer…";
@@ -165,7 +178,7 @@ async function motionTransfer(){
      const sj=await sr.json().catch(()=>({}));
      $("job").textContent=JSON.stringify(sj,null,2);
      if(!sr.ok) throw new Error(sj.detail||sj.error||`Status HTTP ${sr.status}`);
-     if(sj.status==="failed"||sj.status==="canceled") throw new Error(sj.detail?.failure||sj.detail?.error||"Runway Motion Transfer gagal.");
+     if(sj.status==="failed"||sj.status==="canceled") throw new Error(explainError(sj.detail?.failure||sj.detail?.error||sj.detail||sj.error||"Runway Motion Transfer gagal."));
      if(sj.status==="completed"){
        const url=sj.durableOutput|| (Array.isArray(sj.output)?sj.output.find(x=>typeof x==="string"&&/^https?:\/\//.test(x)):null);
        if(url){out.src=url;out.style.display="block";out.load();status.innerHTML='<span class="ok">Selesai.</span> Video hasil sudah siap diputar.';} else status.textContent="Render selesai tetapi provider tidak mengembalikan URL video yang dapat diputar.";
@@ -174,7 +187,7 @@ async function motionTransfer(){
      status.textContent=`Runway memproses Motion Transfer… ${attempt+1}/72`;
    }
    throw new Error("Timeout menunggu hasil Runway (6 menit). Task tetap dapat dicek dengan taskId: "+j.taskId);
- }catch(e){const msg=e?.message||e?.error||(typeof e==="string"?e:JSON.stringify(e));status.textContent="Error: "+msg;$("job").textContent=msg} finally{btn.disabled=false}
+ }catch(e){const msg=explainError(e);status.textContent="Error: "+msg;$("job").textContent=msg} finally{btn.disabled=false}
 }
 
 let mode="balanced";
