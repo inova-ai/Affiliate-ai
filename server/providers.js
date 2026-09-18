@@ -55,7 +55,7 @@ export async function uploadEphemeral(filePath,originalName,apiKey){
     if(!uri.startsWith("runway://")) return {ok:false,code:"RUNWAY_UPLOAD_URI_INVALID",detail:`Runway upload returned an invalid URI: ${uri.slice(0,120)}`};
     return {ok:true,uri,expiresInHours:24,originalName:filename,uploadMode:"sdk-toFile",bytes:size};
   }catch(error){
-    return {ok:false,code:"RUNWAY_UPLOAD_FAILED",detail:error.message};
+    return {ok:false,code:"RUNWAY_UPLOAD_FAILED",detail:errorDetail(error)};
   }
 }
 
@@ -66,7 +66,7 @@ export async function uploadBufferEphemeral(buffer,filename="asset.bin",apiKey){
     const uri=String(response?.uri||"").trim();
     if(!uri.startsWith("runway://")) return {ok:false,code:"RUNWAY_UPLOAD_URI_INVALID",detail:`Runway upload returned an invalid URI: ${uri.slice(0,120)}`};
     return {ok:true,uri,expiresInHours:24,originalName:filename,uploadMode:"buffer-file"};
-  }catch(error){return {ok:false,code:"RUNWAY_UPLOAD_FAILED",detail:error.message};}
+  }catch(error){return {ok:false,code:"RUNWAY_UPLOAD_FAILED",detail:errorDetail(error)};}
 }
 
 export async function runwayRender({promptImage,promptText,duration=5,model="gen4.5",format="9:16",apiKey}){
@@ -76,7 +76,7 @@ export async function runwayRender({promptImage,promptText,duration=5,model="gen
     return {ok:true,status:"completed",taskId:task.id||null,output:task.output||[],raw:task};
   }catch(error){
     if(error instanceof TaskFailedError) return {ok:false,status:"failed",code:"RUNWAY_TASK_FAILED",detail:error.taskDetails};
-    return {ok:false,status:"failed",code:"RUNWAY_REQUEST_FAILED",detail:error.message};
+    return {ok:false,status:"failed",code:"RUNWAY_REQUEST_FAILED",detail:errorDetail(error)};
   }
 }
 function motionPayload({promptImage,referenceVideo,promptText="",duration=5,format="9:16",audio=false}){
@@ -94,7 +94,7 @@ export async function runwayMotionCreate({promptImage,referenceVideo,promptText=
     return {ok:true,status:"submitted",taskId:task.id||null,raw:task};
   }catch(error){
     if(error instanceof TaskFailedError) return {ok:false,status:"failed",code:"RUNWAY_MOTION_TASK_FAILED",detail:error.taskDetails};
-    return {ok:false,status:"failed",code:"RUNWAY_MOTION_REQUEST_FAILED",detail:error.message};
+    return {ok:false,status:"failed",code:"RUNWAY_MOTION_REQUEST_FAILED",detail:errorDetail(error)};
   }
 }
 
@@ -107,7 +107,7 @@ export async function runwayMotionStatus(taskId,apiKey){
     if(status==="SUCCEEDED") return {ok:true,status:"completed",taskId:task.id||taskId,output:task.output||[],raw:task};
     if(status==="FAILED"||status==="CANCELED") return {ok:false,status:status.toLowerCase(),taskId:task.id||taskId,code:"RUNWAY_MOTION_TASK_FAILED",detail:task};
     return {ok:true,status:status.toLowerCase()||"pending",taskId:task.id||taskId,raw:task};
-  }catch(error){ return {ok:false,status:"error",code:"RUNWAY_MOTION_STATUS_FAILED",detail:error.message}; }
+  }catch(error){ return {ok:false,status:"error",code:"RUNWAY_MOTION_STATUS_FAILED",detail:errorDetail(error)}; }
 }
 
 export async function runwayMotionTransfer(args){
@@ -118,7 +118,7 @@ export async function runwayMotionTransfer(args){
     return {ok:true,status:"completed",taskId:task.id||created.taskId,output:task.output||[],raw:task};
   }catch(error){
     if(error instanceof TaskFailedError) return {ok:false,status:"failed",code:"RUNWAY_MOTION_TASK_FAILED",detail:error.taskDetails,taskId:created.taskId};
-    return {ok:false,status:"failed",code:"RUNWAY_MOTION_REQUEST_FAILED",detail:error.message,taskId:created.taskId};
+    return {ok:false,status:"failed",code:"RUNWAY_MOTION_REQUEST_FAILED",detail:errorDetail(error),taskId:created.taskId};
   }
 }
 
@@ -132,6 +132,6 @@ export async function runwayMultiShot({shots,duration=10,firstFrame,format="9:16
     return {ok:true,status:"completed",taskId:task.id||null,output:task.output||[],raw:task};
   }catch(error){
     if(error instanceof TaskFailedError) return {ok:false,status:"failed",code:"RUNWAY_TASK_FAILED",detail:error.taskDetails};
-    return {ok:false,status:"failed",code:"RUNWAY_REQUEST_FAILED",detail:error.message};
+    return {ok:false,status:"failed",code:"RUNWAY_REQUEST_FAILED",detail:errorDetail(error)};
   }
 }
