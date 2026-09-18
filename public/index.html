@@ -145,18 +145,30 @@ async function uploadToRunwayDirect(file,status,label){
 }
 
 function explainError(value){
-  if(value==null)return "Unknown error";
-  if(typeof value==="string")return value;
-  if(value instanceof Error){ const m=value.message; return m==null ? (value.name||"Error") : explainError(m); }
-  if(typeof value==="object"){
-    for(const k of ["message","error","detail","reason","failure","code"]){
-      if(value[k]!=null){ const x=explainError(value[k]); if(x && x!=="Unknown error") return x; }
+  const seen=new WeakSet();
+  function walk(v,depth=0){
+    if(v==null)return "Unknown error";
+    if(typeof v==="string")return v;
+    if(typeof v==="number"||typeof v==="boolean")return String(v);
+    if(depth>6)return "[detail terlalu dalam]";
+    if(v instanceof Error){
+      const msg=walk(v.message,depth+1);
+      if(msg!=="Unknown error")return msg;
+      return v.name||"Error";
     }
-    try{return JSON.stringify(value,null,2)}catch{return String(value)}
+    if(typeof v==="object"){
+      if(seen.has(v))return "[circular error detail]";
+      seen.add(v);
+      for(const k of ["message","error","detail","reason","failure"]){
+        if(v[k]!=null){const msg=walk(v[k],depth+1);if(msg!=="Unknown error"&&msg!=="[circular error detail]")return msg;}
+      }
+      try{const json=JSON.stringify(v,null,2);if(json&&json!=="{}")return json;}catch{}
+      return "Error object diterima tetapi detail tidak dapat diserialisasi.";
+    }
+    return String(v);
   }
-  return String(value);
+  return walk(value);
 }
-
 async function motionTransfer(){
  const image=$("motionImage").files[0], video=$("motionVideo").files[0]; const status=$("motionStatus"), btn=$("motionBtn"), out=$("motionResult");
  if(!image||!video){status.textContent="Pilih 1 foto dan 1 video referensi.";return}
@@ -304,10 +316,10 @@ async function renderProject(){
  let r=await fetch("/api/render-project",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
  let j=await r.json(); $("job").textContent=JSON.stringify(j.project||j,null,2);
 }
-async function renderJob(){let body={duration:+$("duration").value,hook:$("hook").value,product:$("product").value,motion:$("motion").value,format:$("format").value,mode,imageUrl:$("imageUrl").value,characterLock:$("characterLock").checked,productLock:$("productLock").checked,autoQC:$("autoQC").checked,threePose:$("threePose").checked,productProfileId:$("productProfileId").value.trim()||null,characterProfileId:$("characterProfileId").value.trim()||null};let r=await fetch("/api/render",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});let j=await r.json();$("job").textContent=JSON.stringify(j.job,null,2);plan()}
+async function renderJob(){let body={duration:+$("duration").value,hook:$("hook").value,product:$("product").value,motion:$("motion").value,format:$("format").value,mode,imageUrl:$("imageUrl").value,characterLock:$("characterLock").checked,productLock:$("productLock").checked,autoQC:$("autoQC").checked,threePose:$("threePose").checked,productProfileId:$("productProfileId").value.trim()||null,characterProfileId:$("characterProfileId").value.trim()||null};let r=await fetch("/api/render",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});let j=await r.json();$("job").textContent=JSON.stringify(j.job??j,null,2);plan()}
 (async()=>{let r=await fetch("/api/health",{headers:runwayHeaders(false)});let j=await r.json();$("api").innerHTML=j.runwayConfigured?'<span class="ok">Runway key detected</span>':'<span class="warn">Runway key not set</span>';estimate()})();
 </script><section class="panel" id="aiDirectorPanel" style="margin-top:18px"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><div class="eyebrow">V16 INTELLIGENT ENGINE</div><h2 style="margin:.25rem 0">AI DIRECTOR</h2><p style="opacity:.75;margin:.25rem 0">Storyboard sebelum render: hook, framing, camera motion, intent, dan risk gate.</p></div><button id="planShotsBtn">PLAN SHOTS</button></div><div id="shotPlanStatus" style="margin-top:12px;opacity:.8">Belum ada shot plan.</div><div id="shotPlanList" style="display:grid;gap:10px;margin-top:12px"></div></section><script>
-(()=>{const b=document.getElementById("planShotsBtn"),s=document.getElementById("shotPlanStatus"),l=document.getElementById("shotPlanList");if(!b)return;b.onclick=async()=>{b.disabled=true;s.textContent="Menyusun shot plan...";try{const d=await (await fetch("/api/shot-plan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({duration:Number(document.querySelector("[name=duration],#duration")?.value||15),ratio:document.querySelector("[name=ratio],#ratio")?.value||"9:16",brief:document.querySelector("[name=brief],#brief,textarea")?.value||"",productLock:!!document.querySelector("#productLock")?.checked,characterLock:!!document.querySelector("#characterLock")?.checked})})).json();if(!d.ok)throw Error(d.error||"Shot plan gagal");s.textContent="PLAN READY · "+d.plan.planId+(d.plan.preflight.riskFlags.length?" · REVIEW REQUIRED":" · PREFLIGHT READY");l.innerHTML=d.plan.shots.map(x=>`<div style="border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:12px"><strong>${x.order}. ${x.type}</strong> · ${x.duration}s<div style="opacity:.78;margin-top:5px">${x.framing} · ${x.cameraMotion}</div><div style="opacity:.65;margin-top:5px">${x.intent}</div></div>`).join("")}catch(e){s.textContent="Shot plan error: "+explainError(e);l.innerHTML=""}finally{b.disabled=false}}})();</script><script id="luxmotion-modern-ui-script">
+(()=>{const b=document.getElementById("planShotsBtn"),s=document.getElementById("shotPlanStatus"),l=document.getElementById("shotPlanList");if(!b)return;b.onclick=async()=>{b.disabled=true;s.textContent="Menyusun shot plan...";try{const d=await (await fetch("/api/shot-plan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({duration:Number(document.querySelector("[name=duration],#duration")?.value||15),ratio:document.querySelector("[name=ratio],#ratio")?.value||"9:16",brief:document.querySelector("[name=brief],#brief,textarea")?.value||"",productLock:!!document.querySelector("#productLock")?.checked,characterLock:!!document.querySelector("#characterLock")?.checked})})).json();if(!d.ok)throw Error(explainError(d.error||d||"Shot plan gagal"));s.textContent="PLAN READY · "+d.plan.planId+(d.plan.preflight.riskFlags.length?" · REVIEW REQUIRED":" · PREFLIGHT READY");l.innerHTML=d.plan.shots.map(x=>`<div style="border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:12px"><strong>${x.order}. ${x.type}</strong> · ${x.duration}s<div style="opacity:.78;margin-top:5px">${x.framing} · ${x.cameraMotion}</div><div style="opacity:.65;margin-top:5px">${x.intent}</div></div>`).join("")}catch(e){s.textContent="Shot plan error: "+explainError(e);l.innerHTML=""}finally{b.disabled=false}}})();</script><script id="luxmotion-modern-ui-script">
 document.addEventListener("DOMContentLoaded",()=>{if(document.querySelector(".lm-shell"))return;
 const sh=document.createElement("div");sh.className="lm-shell";
 sh.innerHTML=`<div class="lm-bar"><div class="lm-brand">LUX<b>MOTION</b> <span style="color:#687083">AI</span></div><div class="lm-chip"><i class="lm-dot"></i>Workspace Ready</div><div class="lm-nav">${["Studio","Profile","Motion","Produce","QC","Delivery"].map((x,i)=>`<button class="${i?"":"on"}" data-go="${x}">${x}</button>`).join("")}</div></div>
