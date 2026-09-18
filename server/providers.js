@@ -33,6 +33,34 @@ export function estimate(mode,duration,fps=30){
 }
 function key(explicitKey){return String(explicitKey||process.env.RUNWAYML_API_SECRET||process.env.RUNWAY_API_KEY||"").trim();}
 function client(explicitKey){return new RunwayML({apiKey:key(explicitKey)});}
+function safeJson(value, seen=new WeakSet(), depth=0){
+  if(value==null) return value;
+  if(typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if(depth>4) return "[Max detail depth]";
+  if(typeof value === "object"){
+    if(seen.has(value)) return "[Circular]";
+    seen.add(value);
+    if(value instanceof Error){
+      return {name:value.name||"Error",message:safeJson(value.message,seen,depth+1),code:value.code??null,status:value.status??value.statusCode??null};
+    }
+    if(Array.isArray(value)) return value.slice(0,30).map(v=>safeJson(v,seen,depth+1));
+    const out={};
+    for(const k of ["message","error","detail","reason","failure","code","status","statusCode","type","name","requestId","id"]){
+      if(value[k]!==undefined) out[k]=safeJson(value[k],seen,depth+1);
+    }
+    if(!Object.keys(out).length){
+      for(const [k,v] of Object.entries(value).slice(0,20)) out[k]=safeJson(v,seen,depth+1);
+    }
+    return out;
+  }
+  return String(value);
+}
+
+function errorDetail(error){
+  const detail=safeJson(error);
+  return detail && typeof detail === "object" ? detail : {message:String(detail??"Unknown error")};
+}
+
 function ratioFor(format="9:16"){
   return ({"9:16":"720:1280","1:1":"960:960","4:5":"832:1040","16:9":"1280:720"})[format]||"720:1280";
 }
