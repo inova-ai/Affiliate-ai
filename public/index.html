@@ -47,7 +47,7 @@ input,select,textarea{background:rgba(5,7,11,.68)!important;color:var(--lm-text)
 <body><main class="wrap">
 <header class="brand"><div class="logo">LUXMOTION AI</div><div class="pill">V18.3.3 • VERCEL + MOTION TRANSFER</div></header>
 <section class="card" style="margin-top:18px" id="runwayManager"><h2 style="margin-top:0">RUNWAY API MANAGER</h2><p class="sub">Masukkan API key di browser untuk sesi ini. Key tidak disimpan ke source code dan tidak ditulis ke Vercel Environment Variables.</p><div class="row"><div><label>Runway API Key</label><input id="runwayApiKey" type="password" autocomplete="off" placeholder="key_…"></div><div style="display:flex;align-items:end;gap:8px"><button class="btn ghost" id="runwayTestBtn" onclick="testRunwayConnection()">TEST CONNECTION</button><button class="btn ghost" onclick="clearRunwayKey()">CLEAR</button></div></div><div class="small" id="runwayManagerStatus" style="margin-top:10px">Belum ada API key untuk sesi browser ini.</div><p class="small" style="margin-bottom:0">Catatan: key tetap terlihat oleh browser yang kamu gunakan dan dikirim ke server melalui HTTPS. Jangan gunakan mode ini pada komputer/browser yang tidak kamu percaya.</p></section>
-<section class="card" style="margin-top:18px" id="motionTransferPanel"><h2 style="margin-top:0">PHOTO → MOTION TRANSFER</h2><p class="sub">Upload 1 foto sebagai subjek utama dan 1 video sebagai referensi gerakan/kamera. File masuk ke Vercel Blob lalu dipindahkan server ke Runway Ephemeral Upload; ini menghindari error upload-init 403, masalah HEAD pada signed URL, dan batas payload Vercel.</p><div class="row"><div><label>Foto Utama</label><input id="motionImage" type="file" accept="image/jpeg,image/png,image/webp"></div><div><label>Video Referensi Gerakan</label><input id="motionVideo" type="file" accept="video/mp4,video/webm,video/quicktime"></div></div><label>Instruksi Tambahan (opsional)</label><textarea id="motionPrompt" placeholder="Contoh: pertahankan wajah dan pakaian, ikuti gerakan tubuh dan kamera dari video referensi."></textarea><div class="row"><div><label>Durasi Hasil</label><select id="motionDuration"><option>5</option><option>10</option><option>15</option><option>20</option><option>30</option></select></div><div><label>Format</label><select id="motionFormat"><option>9:16</option><option>1:1</option><option>4:5</option><option>16:9</option></select></div></div><label><input type="checkbox" id="motionAudio"> Generate audio</label><button class="btn" id="motionBtn" onclick="motionTransfer()">BUAT VIDEO DARI GERAKAN REFERENSI</button><div class="small" id="motionStatus" style="margin-top:10px">Siap. File diupload langsung ke Vercel Blob agar tidak terkena batas payload Vercel 4.5 MB, lalu server mengirim salinan sementara ke Runway Ephemeral Upload. Video referensi maksimal 30 detik dan minimal 480p.</div><video id="motionResult" controls playsinline style="display:none;width:100%;margin-top:14px;border-radius:14px;background:#000"></video></section>
+<section class="card" style="margin-top:18px" id="motionTransferPanel"><h2 style="margin-top:0">PHOTO → MOTION TRANSFER</h2><p class="sub">Upload 1 foto sebagai subjek utama dan 1 video sebagai referensi gerakan/kamera. File dikirim langsung ke Runway Ephemeral Upload menggunakan sesi upload yang dibuat server; ini menghindari batas payload Vercel dan tidak memerlukan Blob untuk input sementara.</p><div class="row"><div><label>Foto Utama</label><input id="motionImage" type="file" accept="image/jpeg,image/png,image/webp"></div><div><label>Video Referensi Gerakan</label><input id="motionVideo" type="file" accept="video/mp4,video/webm,video/quicktime"></div></div><label>Instruksi Tambahan (opsional)</label><textarea id="motionPrompt" placeholder="Contoh: pertahankan wajah dan pakaian, ikuti gerakan tubuh dan kamera dari video referensi."></textarea><div class="row"><div><label>Durasi Hasil</label><select id="motionDuration"><option>5</option><option>10</option><option>15</option><option>20</option><option>30</option></select></div><div><label>Format</label><select id="motionFormat"><option>9:16</option><option>1:1</option><option>4:5</option><option>16:9</option></select></div></div><label><input type="checkbox" id="motionAudio"> Generate audio</label><button class="btn" id="motionBtn" onclick="motionTransfer()">BUAT VIDEO DARI GERAKAN REFERENSI</button><div class="small" id="motionStatus" style="margin-top:10px">Siap. File akan diupload langsung ke Runway Ephemeral Upload. Video referensi maksimal 200 MB; Runway mensyaratkan input video minimal 480p.</div><video id="motionResult" controls playsinline style="display:none;width:100%;margin-top:14px;border-radius:14px;background:#000"></video></section>
 
 <section class="grid">
 <div class="card">
@@ -117,33 +117,6 @@ async function compressImageForServerUpload(file,maxBytes=3.5*1024*1024){
   return new File([blob],file.name.replace(/\.[^.]+$/i,".jpg"),{type:"image/jpeg",lastModified:Date.now()});
 }
 
-async function uploadToRunwayDirect(file,status,label){
-  status.textContent=`Mengupload ${label} ke Vercel Blob…`;
-  // Photos always use a server-side Blob PUT; no browser presigned PUT/verify race.
-  if(file.type&&file.type.startsWith("image/")){
-    const safeFile=await compressImageForServerUpload(file);
-    const fd=new FormData(); fd.append("file",safeFile,safeFile.name);
-    const sr=await fetch("/api/blob/upload",{method:"POST",body:fd});
-    const sj=await sr.json().catch(()=>({}));
-    if(!sr.ok||!sj.ok)throw new Error(explainError(sj.detail||sj.error||sj||`Upload ${label} ke Vercel Blob gagal (HTTP ${sr.status}).`));
-    return {pathname:sj.pathname,blobUrl:sj.url||null,contentType:sj.contentType||safeFile.type};
-  }
-  // Use a single deterministic path: server mints a fresh private signed PUT
-  // URL with a UUID pathname. This avoids client-token retries/replays causing
-  // Blob pathname collisions while still streaming large videos browser->Blob.
-  const init=await fetch("/api/blob/presign",{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({filename:file.name,contentType:file.type||"application/octet-stream"})
-  });
-  const ij=await init.json().catch(()=>({}));
-  if(!init.ok||!ij.ok) throw new Error(explainError(ij.detail||ij.error||ij||`Upload ${label} gagal menyiapkan signed PUT (HTTP ${init.status}).`));
-  const up=await fetch(ij.url,{method:"PUT",headers:{"Content-Type":file.type||"application/octet-stream"},body:file});
-  if(!up.ok){const txt=await up.text().catch(()=>"");throw new Error(`Upload ${label} gagal pada Private Blob PUT (HTTP ${up.status}). ${txt.slice(0,300)}`);}
-  status.textContent=`Upload ${label} ke Private Blob selesai.`;
-  return {pathname:ij.pathname,blobUrl:null,contentType:file.type||"application/octet-stream",fallback:false};
-}
-
 function explainError(value){
   const seen=new WeakSet();
   function walk(v,depth=0){
@@ -169,30 +142,44 @@ function explainError(value){
   }
   return walk(value);
 }
+async function uploadFileToRunway(file,label,status){
+  status.textContent=`Menyiapkan upload ${label} langsung ke Runway…`;
+  const init=await fetch("/api/runway/upload-init",{method:"POST",headers:{...runwayHeaders(),"Content-Type":"application/json"},body:JSON.stringify({filename:file.name,contentType:file.type||"application/octet-stream"})});
+  const ij=await init.json().catch(()=>({}));
+  if(!init.ok||!ij.ok) throw new Error(explainError(ij.detail||ij.error||ij||`Runway upload initialization gagal (HTTP ${init.status}).`));
+  const form=new FormData();
+  for(const [k,v] of Object.entries(ij.fields||{})) form.append(k,String(v));
+  form.append("file",file,file.name);
+  status.textContent=`Mengupload ${label} ke Runway…`;
+  const up=await fetch(ij.uploadUrl,{method:"POST",body:form});
+  if(!up.ok){const txt=await up.text().catch(()=>"");throw new Error(`Runway upload ${label} gagal (HTTP ${up.status}). ${txt.slice(0,500)}`);}
+  return {uri:ij.runwayUri,filename:file.name};
+}
 async function motionTransfer(){
  const image=$("motionImage").files[0], video=$("motionVideo").files[0]; const status=$("motionStatus"), btn=$("motionBtn"), out=$("motionResult");
  if(!image||!video){status.textContent="Pilih 1 foto dan 1 video referensi.";return}
  if(video.size>200*1024*1024){status.textContent="Video referensi maksimal 200 MB.";return}
+ if(image.size<512||video.size<512){status.textContent="File terlalu kecil untuk upload Runway.";return}
  if(!/^image\/(jpeg|png|webp)$/.test(image.type)){status.textContent="Foto harus JPG, PNG, atau WebP.";return}
  if(!/^video\/(mp4|webm|quicktime)$/.test(video.type)){status.textContent="Video harus MP4, WebM, atau MOV/QuickTime.";return}
- btn.disabled=true; status.textContent="Menyiapkan upload ke Blob yang kompatibel dengan Runway…"; out.style.display="none";
+ btn.disabled=true; status.textContent="Menyiapkan Motion Transfer…"; out.style.display="none";
  try{
-   const imageAsset=await uploadToRunwayDirect(image,status,"foto"); const videoAsset=await uploadToRunwayDirect(video,status,"video referensi");
-   status.textContent="Memindahkan asset Blob ke upload ephemeral Runway…";
-   const r=await fetch("/api/motion-transfer/runway",{method:"POST",headers:runwayHeaders(),body:JSON.stringify({sourceImagePath:imageAsset.pathname,sourceImageName:image.name,motionReferencePath:videoAsset.pathname,motionReferenceName:video.name,prompt:$("motionPrompt").value,duration:Number($("motionDuration").value),format:$("motionFormat").value,audio:$("motionAudio").checked})});
+   const imageAsset=await uploadFileToRunway(image,"foto",status);
+   const videoAsset=await uploadFileToRunway(video,"video referensi",status);
+   status.textContent="Mengirim Motion Transfer ke Runway…";
+   const r=await fetch("/api/motion-transfer/runway",{method:"POST",headers:{...runwayHeaders(),"Content-Type":"application/json"},body:JSON.stringify({sourceImageUri:imageAsset.uri,motionReferenceUri:videoAsset.uri,prompt:$("motionPrompt").value,duration:Number($("motionDuration").value),format:$("motionFormat").value,audio:$("motionAudio").checked})});
    const j=await r.json().catch(()=>({})); if(!r.ok||!j.ok) throw new Error(explainError(j.detail||j.error||j||"Motion transfer gagal"));
    $("job").textContent=JSON.stringify(j,null,2);
    if(!j.taskId) throw new Error("Runway tidak mengembalikan taskId.");
    status.textContent="Runway sedang memproses Motion Transfer…";
    for(let attempt=0;attempt<72;attempt++){
-     await new Promise(resolve=>setTimeout(resolve,5000));
-     const sr=await fetch(`/api/motion-transfer/runway/status/${encodeURIComponent(j.taskId)}`,{headers:runwayHeaders(false)});
-     const sj=await sr.json().catch(()=>({}));
+     await new Promise(x=>setTimeout(x,5000));
+     const sr=await fetch(`/api/motion-transfer/runway/status/${encodeURIComponent(j.taskId)}`,{headers:runwayHeaders(false)}); const sj=await sr.json().catch(()=>({}));
      $("job").textContent=JSON.stringify(sj,null,2);
      if(!sr.ok) throw new Error(explainError(sj.detail||sj.error||sj||`Status HTTP ${sr.status}`));
      if(sj.status==="failed"||sj.status==="canceled") throw new Error(explainError(sj.detail?.failure||sj.detail?.error||sj.detail||sj.error||"Runway Motion Transfer gagal."));
      if(sj.status==="completed"){
-       const url=sj.durableOutput|| (Array.isArray(sj.output)?sj.output.find(x=>typeof x==="string"&&/^https?:\/\//.test(x)):null);
+       const url=sj.durableOutput||sj.output?.[0];
        if(url){out.src=url;out.style.display="block";out.load();status.innerHTML='<span class="ok">Selesai.</span> Video hasil sudah siap diputar.';} else status.textContent="Render selesai tetapi provider tidak mengembalikan URL video yang dapat diputar.";
        return;
      }
@@ -201,10 +188,6 @@ async function motionTransfer(){
    throw new Error("Timeout menunggu hasil Runway (6 menit). Task tetap dapat dicek dengan taskId: "+j.taskId);
  }catch(e){const msg=explainError(e);status.textContent="Error: "+msg;$("job").textContent=msg} finally{btn.disabled=false}
 }
-
-let mode="balanced";
-const $=id=>document.getElementById(id);
-document.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{document.querySelectorAll(".chip").forEach(x=>x.classList.remove("active"));c.classList.add("active");mode=c.dataset.mode;estimate();});
 $("duration").onchange=()=>{$("dur").textContent=$("duration").value+"s";estimate()};
 async function estimate(){let r=await fetch("/api/estimate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mode,duration:+$("duration").value})});let j=await r.json();$("router").textContent={economy:"Hemat",balanced:"Seimbang",premium:"Premium","4k":"4K"}[mode];$("credits").textContent=j.estimate.totalCredits+" cr";$("usd").textContent="$"+j.estimate.estimatedUsd}
 async function plan(){let body={duration:+$("duration").value,hook:$("hook").value,product:$("product").value,motion:$("motion").value,format:$("format").value};let r=await fetch("/api/plan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});let j=await r.json();$("story").textContent=j.storyboard.map(s=>`SHOT ${s.index} • ${s.duration}s\\n${s.prompt}\\nTEXT: ${s.textOverlay||"—"}`).join("\\n\\n")}
