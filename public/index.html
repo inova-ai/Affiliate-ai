@@ -101,7 +101,7 @@ input,select,textarea{background:rgba(5,7,11,.68)!important;color:var(--lm-text)
 function getRunwayKey(){return ($("runwayApiKey")?.value||sessionStorage.getItem("luxmotion_runway_key")||"").trim();}
 function runwayHeaders(json=true){const h={"X-Luxmotion-Runway-Key":getRunwayKey()};if(json)h["Content-Type"]="application/json";return h;}
 function clearRunwayKey(){sessionStorage.removeItem("luxmotion_runway_key");if($("runwayApiKey"))$("runwayApiKey").value="";$('runwayManagerStatus').textContent="API key browser session dihapus.";$('api').textContent="Key belum diatur";}
-async function testRunwayConnection(){const k=getRunwayKey();const st=$("runwayManagerStatus"),btn=$("runwayTestBtn");if(!k){st.textContent="Masukkan API key Runway dulu.";return}sessionStorage.setItem("luxmotion_runway_key",k);btn.disabled=true;st.textContent="Mengecek koneksi Runway…";try{const r=await fetch("/api/runway/test",{method:"POST",headers:runwayHeaders(),body:JSON.stringify({})});const j=await r.json().catch(()=>({}));if(!r.ok||!j.ok)throw new Error(j.detail||j.error||`HTTP ${r.status}`);st.innerHTML='<span class="ok">● Connected</span> — Runway API bisa diakses.';$("api").innerHTML='<span class="ok">Runway connected</span>';}catch(e){st.innerHTML='<span class="warn">● Connection error:</span> '+e.message;$("api").innerHTML='<span class="warn">Runway error</span>';}finally{btn.disabled=false}}
+async function testRunwayConnection(){const k=getRunwayKey();const st=$("runwayManagerStatus"),btn=$("runwayTestBtn");if(!k){st.textContent="Masukkan API key Runway dulu.";return}sessionStorage.setItem("luxmotion_runway_key",k);btn.disabled=true;st.textContent="Mengecek koneksi Runway…";try{const r=await fetch("/api/runway/test",{method:"POST",headers:runwayHeaders(),body:JSON.stringify({})});const j=await r.json().catch(()=>({}));if(!r.ok||!j.ok)throw new Error(explainError(j.detail||j.error||j||`HTTP ${r.status}`));st.innerHTML='<span class="ok">● Connected</span> — Runway API bisa diakses.';$("api").innerHTML='<span class="ok">Runway connected</span>';}catch(e){st.innerHTML='<span class="warn">● Connection error:</span> '+explainError(e);$("api").innerHTML='<span class="warn">Runway error</span>';}finally{btn.disabled=false}}
 (function(){const k=sessionStorage.getItem("luxmotion_runway_key");if(k&&$("runwayApiKey")){$("runwayApiKey").value=k;$("runwayManagerStatus").innerHTML='<span class="ok">API key tersedia untuk sesi browser ini.</span>'}})();
 
 async function compressImageForServerUpload(file,maxBytes=3.5*1024*1024){
@@ -125,7 +125,7 @@ async function uploadToRunwayDirect(file,status,label){
     const fd=new FormData(); fd.append("file",safeFile,safeFile.name);
     const sr=await fetch("/api/blob/upload",{method:"POST",body:fd});
     const sj=await sr.json().catch(()=>({}));
-    if(!sr.ok||!sj.ok)throw new Error(sj.detail||sj.error||`Upload ${label} ke Vercel Blob gagal (HTTP ${sr.status}).`);
+    if(!sr.ok||!sj.ok)throw new Error(explainError(sj.detail||sj.error||sj||`Upload ${label} ke Vercel Blob gagal (HTTP ${sr.status}).`));
     return {pathname:sj.pathname,blobUrl:sj.url||null,contentType:sj.contentType||safeFile.type};
   }
   // Use a single deterministic path: server mints a fresh private signed PUT
@@ -137,7 +137,7 @@ async function uploadToRunwayDirect(file,status,label){
     body:JSON.stringify({filename:file.name,contentType:file.type||"application/octet-stream"})
   });
   const ij=await init.json().catch(()=>({}));
-  if(!init.ok||!ij.ok) throw new Error(ij.detail||ij.error||`Upload ${label} gagal menyiapkan signed PUT (HTTP ${init.status}).`);
+  if(!init.ok||!ij.ok) throw new Error(explainError(ij.detail||ij.error||ij||`Upload ${label} gagal menyiapkan signed PUT (HTTP ${init.status}).`));
   const up=await fetch(ij.url,{method:"PUT",headers:{"Content-Type":file.type||"application/octet-stream"},body:file});
   if(!up.ok){const txt=await up.text().catch(()=>"");throw new Error(`Upload ${label} gagal pada Private Blob PUT (HTTP ${up.status}). ${txt.slice(0,300)}`);}
   status.textContent=`Upload ${label} ke Private Blob selesai.`;
@@ -147,7 +147,7 @@ async function uploadToRunwayDirect(file,status,label){
 function explainError(value){
   if(value==null)return "Unknown error";
   if(typeof value==="string")return value;
-  if(value instanceof Error)return value.message||String(value);
+  if(value instanceof Error){ const m=value.message; return m==null ? (value.name||"Error") : explainError(m); }
   if(typeof value==="object"){
     for(const k of ["message","error","detail","reason","failure","code"]){
       if(value[k]!=null){ const x=explainError(value[k]); if(x && x!=="Unknown error") return x; }
@@ -177,7 +177,7 @@ async function motionTransfer(){
      const sr=await fetch(`/api/motion-transfer/runway/status/${encodeURIComponent(j.taskId)}`,{headers:runwayHeaders(false)});
      const sj=await sr.json().catch(()=>({}));
      $("job").textContent=JSON.stringify(sj,null,2);
-     if(!sr.ok) throw new Error(sj.detail||sj.error||`Status HTTP ${sr.status}`);
+     if(!sr.ok) throw new Error(explainError(sj.detail||sj.error||sj||`Status HTTP ${sr.status}`));
      if(sj.status==="failed"||sj.status==="canceled") throw new Error(explainError(sj.detail?.failure||sj.detail?.error||sj.detail||sj.error||"Runway Motion Transfer gagal."));
      if(sj.status==="completed"){
        const url=sj.durableOutput|| (Array.isArray(sj.output)?sj.output.find(x=>typeof x==="string"&&/^https?:\/\//.test(x)):null);
@@ -206,13 +206,13 @@ async function uploadAsset(){
    const fd=new FormData(); fd.append("file",safeFile,safeFile.name);
    const sr=await fetch("/api/blob/upload",{method:"POST",body:fd});
    const sj=await sr.json().catch(()=>({}));
-   if(!sr.ok||!sj.ok)throw new Error(sj.detail||sj.error||`Upload Blob gagal HTTP ${sr.status}`);
+   if(!sr.ok||!sj.ok)throw new Error(explainError(sj.detail||sj.error||sj||`Upload Blob gagal HTTP ${sr.status}`));
    const r=await fetch("/api/upload-from-url",{method:"POST",headers:runwayHeaders(),body:JSON.stringify({pathname:sj.pathname,originalName:safeFile.name,mimeType:safeFile.type,kind:"product",name:$("product").value||""})});
-   const j=await r.json().catch(()=>({})); if(!r.ok||!j.ok)throw new Error(j.detail||j.error||"Gagal membuat reference profile");
+   const j=await r.json().catch(()=>({})); if(!r.ok||!j.ok)throw new Error(explainError(j.detail||j.error||j||"Gagal membuat reference profile"));
    const item=j.files?.asset, uri=item?.runway?.uri||sj.url||""; $("imageUrl").value=uri;
    if(j.profile?.id){$("productProfileId").value=j.profile.id; $("assetGate").textContent=`Reference profile aktif: ${j.profile.id} • ${j.profile.qualityGate?.width||0}x${j.profile.qualityGate?.height||0}`;}
    $("job").textContent=JSON.stringify(j,null,2);
- }catch(e){$("job").textContent="Upload error: "+e.message+". Foto akan dikompres otomatis agar tetap memakai server-side Blob upload.";}
+ }catch(e){$("job").textContent="Upload error: "+explainError(e)+". Foto akan dikompres otomatis agar tetap memakai server-side Blob upload.";}
 }
 
 async function deliver4K(){
@@ -255,20 +255,20 @@ async function autoProduce(){
  try{
   const r=await fetch("/api/auto-produce",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
   const j=await r.json();
-  if(!j.ok) throw new Error(j.error||"Could not start pipeline");
+  if(!j.ok) throw new Error(explainError(j.error||j||"Could not start pipeline"));
   $("job").textContent=JSON.stringify(j.project||j,null,2);
   if(j.project){setLive({stage:j.project.status||"READY",progress:j.project.status==="ready"?100:99,message:j.error||"Production selesai."});}
   else watchProgress(j.id);
- }catch(e){setLive({stage:"ERROR",progress:0,message:e.message});$("job").textContent=e.message}
+ }catch(e){setLive({stage:"ERROR",progress:0,message:explainError(e)});$("job").textContent=explainError(e)}
 }
 
 async function loadProfiles(){
  try{
    const r=await fetch("/api/assets"); const j=await r.json();
-   if(!j.ok) throw new Error(j.error||"Could not load profiles");
+   if(!j.ok) throw new Error(explainError(j.error||j||"Could not load profiles"));
    const p=j.profiles||[];
    $("job").textContent=JSON.stringify(p.map(x=>({id:x.id,kind:x.kind,name:x.metadata?.name||"",references:x.references?.length||0,quality:x.qualityGate?.valid})),null,2);
- }catch(e){$("job").textContent="Profile load error: "+e.message}
+ }catch(e){$("job").textContent="Profile load error: "+explainError(e)}
 }
 async function validateCurrentAsset(){
  const f=$("asset").files[0];
@@ -276,9 +276,9 @@ async function validateCurrentAsset(){
  const fd=new FormData(); fd.append("file",f);
  try{
    const r=await fetch("/api/assets/validate",{method:"POST",body:fd}); const j=await r.json();
-   if(!j.ok) throw new Error(j.error||"Validation failed");
+   if(!j.ok) throw new Error(explainError(j.error||j||"Validation failed"));
    const q=j.validation; $("assetGate").textContent=`Reference: ${q.width}x${q.height} • ${q.valid?"PASS":"REVIEW"}${q.errors?.length?` • ${q.errors.join(" ")}`:""}`;
- }catch(e){$("assetGate").textContent="Validation error: "+e.message}
+ }catch(e){$("assetGate").textContent="Validation error: "+explainError(e)}
 }
 async function refreshProject(){
  let p; try{p=JSON.parse($("job").textContent)}catch{}
@@ -286,7 +286,7 @@ async function refreshProject(){
  try{
    const r=await fetch("/api/project/"+encodeURIComponent(p.id)); const j=await r.json();
    $("job").textContent=JSON.stringify(j.project||j,null,2);
- }catch(e){$("job").textContent="Refresh error: "+e.message}
+ }catch(e){$("job").textContent="Refresh error: "+explainError(e)}
 }
 
 async function deliverProject4K(){
@@ -307,7 +307,7 @@ async function renderProject(){
 async function renderJob(){let body={duration:+$("duration").value,hook:$("hook").value,product:$("product").value,motion:$("motion").value,format:$("format").value,mode,imageUrl:$("imageUrl").value,characterLock:$("characterLock").checked,productLock:$("productLock").checked,autoQC:$("autoQC").checked,threePose:$("threePose").checked,productProfileId:$("productProfileId").value.trim()||null,characterProfileId:$("characterProfileId").value.trim()||null};let r=await fetch("/api/render",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});let j=await r.json();$("job").textContent=JSON.stringify(j.job,null,2);plan()}
 (async()=>{let r=await fetch("/api/health",{headers:runwayHeaders(false)});let j=await r.json();$("api").innerHTML=j.runwayConfigured?'<span class="ok">Runway key detected</span>':'<span class="warn">Runway key not set</span>';estimate()})();
 </script><section class="panel" id="aiDirectorPanel" style="margin-top:18px"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><div class="eyebrow">V16 INTELLIGENT ENGINE</div><h2 style="margin:.25rem 0">AI DIRECTOR</h2><p style="opacity:.75;margin:.25rem 0">Storyboard sebelum render: hook, framing, camera motion, intent, dan risk gate.</p></div><button id="planShotsBtn">PLAN SHOTS</button></div><div id="shotPlanStatus" style="margin-top:12px;opacity:.8">Belum ada shot plan.</div><div id="shotPlanList" style="display:grid;gap:10px;margin-top:12px"></div></section><script>
-(()=>{const b=document.getElementById("planShotsBtn"),s=document.getElementById("shotPlanStatus"),l=document.getElementById("shotPlanList");if(!b)return;b.onclick=async()=>{b.disabled=true;s.textContent="Menyusun shot plan...";try{const d=await (await fetch("/api/shot-plan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({duration:Number(document.querySelector("[name=duration],#duration")?.value||15),ratio:document.querySelector("[name=ratio],#ratio")?.value||"9:16",brief:document.querySelector("[name=brief],#brief,textarea")?.value||"",productLock:!!document.querySelector("#productLock")?.checked,characterLock:!!document.querySelector("#characterLock")?.checked})})).json();if(!d.ok)throw Error(d.error||"Shot plan gagal");s.textContent="PLAN READY · "+d.plan.planId+(d.plan.preflight.riskFlags.length?" · REVIEW REQUIRED":" · PREFLIGHT READY");l.innerHTML=d.plan.shots.map(x=>`<div style="border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:12px"><strong>${x.order}. ${x.type}</strong> · ${x.duration}s<div style="opacity:.78;margin-top:5px">${x.framing} · ${x.cameraMotion}</div><div style="opacity:.65;margin-top:5px">${x.intent}</div></div>`).join("")}catch(e){s.textContent="Shot plan error: "+e.message;l.innerHTML=""}finally{b.disabled=false}}})();</script><script id="luxmotion-modern-ui-script">
+(()=>{const b=document.getElementById("planShotsBtn"),s=document.getElementById("shotPlanStatus"),l=document.getElementById("shotPlanList");if(!b)return;b.onclick=async()=>{b.disabled=true;s.textContent="Menyusun shot plan...";try{const d=await (await fetch("/api/shot-plan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({duration:Number(document.querySelector("[name=duration],#duration")?.value||15),ratio:document.querySelector("[name=ratio],#ratio")?.value||"9:16",brief:document.querySelector("[name=brief],#brief,textarea")?.value||"",productLock:!!document.querySelector("#productLock")?.checked,characterLock:!!document.querySelector("#characterLock")?.checked})})).json();if(!d.ok)throw Error(d.error||"Shot plan gagal");s.textContent="PLAN READY · "+d.plan.planId+(d.plan.preflight.riskFlags.length?" · REVIEW REQUIRED":" · PREFLIGHT READY");l.innerHTML=d.plan.shots.map(x=>`<div style="border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:12px"><strong>${x.order}. ${x.type}</strong> · ${x.duration}s<div style="opacity:.78;margin-top:5px">${x.framing} · ${x.cameraMotion}</div><div style="opacity:.65;margin-top:5px">${x.intent}</div></div>`).join("")}catch(e){s.textContent="Shot plan error: "+explainError(e);l.innerHTML=""}finally{b.disabled=false}}})();</script><script id="luxmotion-modern-ui-script">
 document.addEventListener("DOMContentLoaded",()=>{if(document.querySelector(".lm-shell"))return;
 const sh=document.createElement("div");sh.className="lm-shell";
 sh.innerHTML=`<div class="lm-bar"><div class="lm-brand">LUX<b>MOTION</b> <span style="color:#687083">AI</span></div><div class="lm-chip"><i class="lm-dot"></i>Workspace Ready</div><div class="lm-nav">${["Studio","Profile","Motion","Produce","QC","Delivery"].map((x,i)=>`<button class="${i?"":"on"}" data-go="${x}">${x}</button>`).join("")}</div></div>
