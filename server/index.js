@@ -13,7 +13,7 @@ import {ffmpegPath, ffprobePath, mediaToolInfo} from "./media-tools.js";
 import {blobConfigured, blobAuthInfo, createPresignedPut, createPresignedGet, publishFile, signedUrl, headPrivate, waitForPrivateBlob, readPrivate, downloadPrivateToFile} from "./blob.js";
 import {handleUpload} from "@vercel/blob/client";
 import {buildStoryboard} from "./storyboard.js";
-import {routeModel,estimate,runwayRender,runwayMotionTransfer,runwayMotionCreate,runwayMotionStatus,uploadEphemeral} from "./providers.js";
+import {routeModel,estimate,runwayRender,runwayMotionTransfer,runwayMotionCreate,runwayMotionStatus,uploadEphemeral,createRunwayEphemeralUploadSession} from "./providers.js";
 import {renderProject,makeConcatList} from "./pipeline.js";
 import {mediaQC,lockedPrompt,retryDecision} from "./qc.js";
 import {visualQC,visualRetryDecision} from "./visual-qc.js";
@@ -281,13 +281,10 @@ async function normalizeRunwayVideo(input, output){
  return output;
 }
 
-async function createRunwayEphemeralUpload(filename, contentType="application/octet-stream", apiKey){
- const safe=String(filename||"asset.bin").replace(/[^a-zA-Z0-9._-]/g,"_");
- if(!blobConfigured()) return {ok:false,code:"BLOB_REQUIRED",message:"Vercel Blob must be connected for direct browser uploads."};
- const pathname=`luxmotion/uploads/${crypto.randomUUID()}-${safe}`;
- const uploadUrl=await createPresignedPut(pathname,contentType);
- return {ok:true,uploadUrl,pathname,uploadMode:"vercel-blob",message:"Upload file to the returned Vercel Blob URL, then use /api/blob/read-url to obtain a Runway-compatible HTTPS URL."};
+async function createRunwayEphemeralUpload(filename,contentType="application/octet-stream",apiKey){
+  return createRunwayEphemeralUploadSession(filename,contentType,apiKey);
 }
+
 
 app.post('/api/runway/test',async(req,res)=>{
  const secret=requestRunwayKey(req);

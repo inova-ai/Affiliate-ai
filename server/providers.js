@@ -65,6 +65,26 @@ function ratioFor(format="9:16"){
   return ({"9:16":"720:1280","1:1":"960:960","4:5":"832:1040","16:9":"1280:720"})[format]||"720:1280";
 }
 
+
+export async function createRunwayEphemeralUploadSession(filename="asset.bin",contentType="application/octet-stream",apiKey){
+  const secret=key(apiKey);
+  if(!secret) return {ok:false,code:"RUNWAY_API_KEY_MISSING",message:"Runway API key is not configured."};
+  const safe=String(filename||"asset.bin").replace(/[^a-zA-Z0-9._-]/g,"_");
+  try{
+    const r=await fetch("https://api.dev.runwayml.com/v1/uploads",{
+      method:"POST",
+      headers:{"Authorization":`Bearer ${secret}`,"Content-Type":"application/json","X-Runway-Version":process.env.RUNWAY_API_VERSION||"2024-11-06"},
+      body:JSON.stringify({filename:safe,type:"ephemeral"})
+    });
+    const body=await r.json().catch(()=>({}));
+    if(!r.ok) return {ok:false,code:"RUNWAY_UPLOAD_INIT_FAILED",httpStatus:r.status,detail:safeJson(body)};
+    if(!body.uploadUrl||!body.runwayUri||!body.fields||typeof body.fields!=="object") return {ok:false,code:"RUNWAY_UPLOAD_INIT_INVALID",detail:safeJson(body)};
+    return {ok:true,uploadUrl:String(body.uploadUrl),fields:body.fields,runwayUri:String(body.runwayUri),filename:safe,contentType};
+  }catch(error){
+    return {ok:false,code:"RUNWAY_UPLOAD_INIT_NETWORK_FAILED",detail:errorDetail(error)};
+  }
+}
+
 export async function uploadEphemeral(filePath,originalName,apiKey){
   if(!key(apiKey)) return {ok:false,code:"RUNWAY_API_KEY_MISSING",message:"Set RUNWAYML_API_SECRET in .env."};
   if(!fs.existsSync(filePath)) return {ok:false,code:"FILE_NOT_FOUND",message:"Upload file does not exist."};
