@@ -349,7 +349,7 @@ app.post("/api/motion-transfer/runway",async(req,res)=>{
        const local=path.join(uploadDir,`${crypto.randomUUID()}${ext}`); tempFiles.push(local);
        await downloadPrivateToFile(sourcePath,local);
        const up=await uploadEphemeral(local,`source-image${ext}`,apiKey);
-       if(!up.ok) return res.status(502).json({ok:false,error:"Source image Runway upload failed",detail:up});
+       if(!up.ok) return res.status(502).json({ok:false,error:"Source image Runway upload failed",detail:{code:up.code||null,message:up.message||up.detail||"unknown",provider:up}});
        promptImage=up.uri;
        bridgeMeta.sourceImage={bytes:Number(meta?.size||0),contentType,uriType:"runway-ephemeral",filename:`source-image${ext}`};
      }
@@ -363,7 +363,7 @@ app.post("/api/motion-transfer/runway",async(req,res)=>{
        const local=path.join(uploadDir,`${crypto.randomUUID()}${ext}`); tempFiles.push(local);
        await downloadPrivateToFile(referencePath,local);
        const up=await uploadEphemeral(local,`motion-reference${ext}`,apiKey);
-       if(!up.ok) return res.status(502).json({ok:false,error:"Motion reference Runway upload failed",detail:up});
+       if(!up.ok) return res.status(502).json({ok:false,error:"Motion reference Runway upload failed",detail:{code:up.code||null,message:up.message||up.detail||"unknown",provider:up}});
        referenceVideo=up.uri;
        bridgeMeta.motionReference={bytes:Number(meta?.size||0),contentType,uriType:"runway-ephemeral",filename:`motion-reference${ext}`};
      }
